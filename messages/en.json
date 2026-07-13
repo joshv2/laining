@@ -1,0 +1,8 @@
+{
+  "siteName": "Laining Collaborative",
+  "tagline": "Learn, record, and share chanting by pasuk.",
+  "actions": {
+    "signIn": "Sign In",
+    "browse": "Browse"
+  }
+}

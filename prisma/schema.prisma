@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  MODERATOR
+  SUPERUSER
+}
+
+enum UiLanguage {
+  EN
+  HE
+}
+
+enum WorkType {
+  TORAH
+  NEVIIM
+  KETUVIM
+}
+
+enum RecordingSource {
+  UPLOAD
+  BROWSER_RECORDING
+}
+
+enum RecordingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum VoteType {
+  UPVOTE
+  DOWNVOTE
+}
+
+model User {
+  id                 String               @id @default(cuid())
+  name               String?
+  email              String?              @unique
+  emailVerified      DateTime?
+  image              String?
+  role               Role                 @default(USER)
+  preferredLanguage  UiLanguage           @default(EN)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  accounts           Account[]
+  sessions           Session[]
+  recordings         Recording[]
+  votes              Vote[]
+  moderationActions  ModerationDecision[] @relation("ModeratorActions")
+  approvedRecordings Recording[]          @relation("RecordingApprovals")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+model Work {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  titleEn   String
+  titleHe   String
+  kind      WorkType
+  books     Book[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  Portion   Portion[]
+}
+
+model Book {
+  id        String    @id @default(cuid())
+  workId    String
+  work      Work      @relation(fields: [workId], references: [id], onDelete: Cascade)
+  slug      String
+  titleEn   String
+  titleHe   String
+  chapters  Chapter[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([workId, slug])
+}
+
+model Chapter {
+  id        String   @id @default(cuid())
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  number    Int
+  pesukim   Pasuk[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([bookId, number])
+}
+
+model Pasuk {
+  id           String          @id @default(cuid())
+  chapterId    String
+  chapter      Chapter         @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  number       Int
+  ref          String          @unique
+  hebrewText   String
+  englishText  String?
+  boundaries   PasukBoundary[]
+  recordings   Recording[]     @relation("PrimaryPasuk")
+  startsRange  Recording[]     @relation("RangeStart")
+  endsRange    Recording[]     @relation("RangeEnd")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  PortionPasuk PortionPasuk[]
+
+  @@unique([chapterId, number])
+}
+
+model Portion {
+  id          String         @id @default(cuid())
+  slug        String         @unique
+  titleEn     String
+  titleHe     String
+  workId      String?
+  work        Work?          @relation(fields: [workId], references: [id])
+  orderedText PortionPasuk[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model PortionPasuk {
+  id        String  @id @default(cuid())
+  portionId String
+  pasukId   String
+  position  Int
+  portion   Portion @relation(fields: [portionId], references: [id], onDelete: Cascade)
+  pasuk     Pasuk   @relation(fields: [pasukId], references: [id], onDelete: Cascade)
+
+  @@unique([portionId, position])
+  @@unique([portionId, pasukId])
+}
+
+model Recording {
+  id                  String               @id @default(cuid())
+  userId              String
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primaryPasukId      String
+  primaryPasuk        Pasuk                @relation("PrimaryPasuk", fields: [primaryPasukId], references: [id], onDelete: Cascade)
+  rangeStartPasukId   String
+  rangeStartPasuk     Pasuk                @relation("RangeStart", fields: [rangeStartPasukId], references: [id], onDelete: Cascade)
+  rangeEndPasukId     String
+  rangeEndPasuk       Pasuk                @relation("RangeEnd", fields: [rangeEndPasukId], references: [id], onDelete: Cascade)
+  source              RecordingSource
+  nussach             String
+  nussachCustom       String?
+  storageKey          String
+  publicUrl           String
+  durationMs          Int
+  status              RecordingStatus      @default(PENDING_APPROVAL)
+  moderationNotes     String?
+  submittedAt         DateTime             @default(now())
+  approvedAt          DateTime?
+  approvedByUserId    String?
+  approvedBy          User?                @relation("RecordingApprovals", fields: [approvedByUserId], references: [id])
+  autoAlignmentStatus String?
+  boundaries          PasukBoundary[]
+  votes               Vote[]
+  moderationHistory   ModerationDecision[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@index([primaryPasukId, status])
+}
+
+model PasukBoundary {
+  id          String    @id @default(cuid())
+  recordingId String
+  pasukId     String
+  startMs     Int
+  endMs       Int
+  confidence  Float?
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  pasuk       Pasuk     @relation(fields: [pasukId], references: [id], onDelete: Cascade)
+
+  @@unique([recordingId, pasukId])
+  @@index([recordingId, startMs])
+}
+
+model Vote {
+  id          String    @id @default(cuid())
+  userId      String
+  recordingId String
+  type        VoteType
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recordingId])
+  @@index([recordingId, type])
+}
+
+model ModerationDecision {
+  id          String          @id @default(cuid())
+  recordingId String
+  moderatorId String
+  nextStatus  RecordingStatus
+  reason      String?
+  createdAt   DateTime        @default(now())
+  recording   Recording       @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  moderator   User            @relation("ModeratorActions", fields: [moderatorId], references: [id], onDelete: Cascade)
+
+  @@index([recordingId, createdAt])
+  @@index([moderatorId, createdAt])
+}
+
+model PaywalledAsset {
+  id           String   @id @default(cuid())
+  recordingId  String   @unique
+  enabled      Boolean  @default(false)
+  priceCents   Int?
+  currencyCode String?  @default("USD")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RevenueShareRule {
+  id              String    @id @default(cuid())
+  recorderPercent Int
+  platformPercent Int
+  effectiveFrom   DateTime
+  effectiveUntil  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}

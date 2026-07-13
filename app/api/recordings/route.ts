@@ -1,0 +1,114 @@
+import { RecordingStatus } from "@prisma/client";
+import { NextRequest } from "next/server";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db/client";
+import { createRecordingSchema, normalizeNussach } from "@/lib/services/recording-ingestion";
+
+export async function GET(request: NextRequest) {
+  const session = await auth();
+  const searchParams = request.nextUrl.searchParams;
+  const pasukId = searchParams.get("pasukId") || undefined;
+
+  const statusFilter =
+    session?.user?.role === "MODERATOR" || session?.user?.role === "SUPERUSER"
+      ? undefined
+      : RecordingStatus.APPROVED;
+
+  const where = pasukId
+    ? {
+        status: statusFilter,
+        OR: [
+          { primaryPasukId: pasukId },
+          {
+            boundaries: {
+              some: {
+                pasukId,
+              },
+            },
+          },
+        ],
+      }
+    : {
+        status: statusFilter,
+      };
+
+  const recordings = await prisma.recording.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    include: {
+      user: { select: { id: true, name: true } },
+      _count: { select: { votes: true } },
+      boundaries: {
+        orderBy: { startMs: "asc" },
+        select: {
+          pasukId: true,
+          startMs: true,
+          endMs: true,
+          pasuk: {
+            select: {
+              ref: true,
+              number: true,
+            },
+          },
+        },
+      },
+    },
+    take: 100,
+  });
+
+  const rankedRecordings = pasukId
+    ? [...recordings].sort((a, b) => {
+        const aPrimary = a.primaryPasukId === pasukId ? 1 : 0;
+        const bPrimary = b.primaryPasukId === pasukId ? 1 : 0;
+        if (aPrimary !== bPrimary) {
+          return bPrimary - aPrimary;
+        }
+        return b.createdAt.getTime() - a.createdAt.getTime();
+      })
+    : recordings;
+
+  const responseRecordings = rankedRecordings.map((recording) => {
+    const boundaryMatches = pasukId
+      ? recording.boundaries.filter((item) => item.pasukId === pasukId).length
+      : 0;
+
+    return {
+      ...recording,
+      matchType:
+        pasukId && recording.primaryPasukId === pasukId
+          ? "primary"
+          : pasukId && boundaryMatches > 0
+            ? "boundary"
+            : "none",
+    };
+  });
+
+  return Response.json({ recordings: responseRecordings });
+}
+
+export async function POST(request: NextRequest) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const parsed = createRecordingSchema.safeParse(await request.json());
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const normalized = normalizeNussach(parsed.data);
+  const recording = await prisma.recording.create({
+    data: {
+      ...parsed.data,
+      nussach: normalized.nussach,
+      nussachCustom: normalized.nussachCustom,
+      userId: session.user.id,
+      status: RecordingStatus.PENDING_APPROVAL,
+    },
+  });
+
+  return Response.json({ recording }, { status: 201 });
+}

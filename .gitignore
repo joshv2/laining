@@ -33,6 +33,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local editor state
+.vscode/
+
+# runtime uploads
+public/uploads/*
+!public/uploads/.gitkeep
+
 # vercel
 .vercel
 

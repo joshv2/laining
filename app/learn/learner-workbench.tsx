@@ -1,0 +1,548 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type ChapterSummary = {
+  id: string;
+  number: number;
+  _count: {
+    pesukim: number;
+  };
+};
+
+type BookSummary = {
+  id: string;
+  titleEn: string;
+  titleHe: string;
+  chapters: ChapterSummary[];
+};
+
+type WorkSummary = {
+  id: string;
+  titleEn: string;
+  titleHe: string;
+  books: BookSummary[];
+};
+
+type Pasuk = {
+  id: string;
+  number: number;
+  ref: string;
+  hebrewText: string;
+  englishText: string | null;
+  chapterId: string;
+  chapterNumber: number;
+};
+
+type RecordingBoundary = {
+  pasukId: string;
+  startMs: number;
+  endMs: number;
+  pasuk: {
+    ref: string;
+    number: number;
+  };
+};
+
+type RecordingItem = {
+  id: string;
+  nussach: string;
+  nussachCustom: string | null;
+  publicUrl: string;
+  durationMs: number;
+  createdAt: string;
+  primaryPasukId: string;
+  user: {
+    id: string;
+    name: string | null;
+  };
+  boundaries: RecordingBoundary[];
+  matchType: "primary" | "boundary" | "none";
+};
+
+function ms(value: number): string {
+  return `${Math.max(0, Math.round(value))} ms`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function LearnerWorkbench() {
+  const [works, setWorks] = useState<WorkSummary[]>([]);
+  const [bookPesukim, setBookPesukim] = useState<Pasuk[]>([]);
+  const [recordings, setRecordings] = useState<RecordingItem[]>([]);
+
+  const [loadingLibrary, setLoadingLibrary] = useState(true);
+  const [loadingPesukim, setLoadingPesukim] = useState(false);
+  const [loadingRecordings, setLoadingRecordings] = useState(false);
+
+  const [workId, setWorkId] = useState("");
+  const [bookId, setBookId] = useState("");
+  const [chapterId, setChapterId] = useState("");
+  const [pasukId, setPasukId] = useState("");
+
+  const [selectedRecordingId, setSelectedRecordingId] = useState("");
+  const [currentMs, setCurrentMs] = useState(0);
+  const [focusedBoundaryIndex, setFocusedBoundaryIndex] = useState(0);
+  const [segmentStopMs, setSegmentStopMs] = useState<number | null>(null);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const segmentStopRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLibrary() {
+      setLoadingLibrary(true);
+      try {
+        const response = await fetch("/api/text/library");
+        const data = await response.json();
+        if (!cancelled) {
+          setWorks(data.works ?? []);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingLibrary(false);
+        }
+      }
+    }
+
+    loadLibrary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedWork = useMemo(() => works.find((item) => item.id === workId), [works, workId]);
+  const selectedBook = useMemo(() => selectedWork?.books.find((item) => item.id === bookId), [selectedWork, bookId]);
+
+  const chapterPesukim = useMemo(() => {
+    if (!chapterId) return bookPesukim;
+    return bookPesukim.filter((item) => item.chapterId === chapterId);
+  }, [bookPesukim, chapterId]);
+
+  const selectedRecording = useMemo(
+    () => recordings.find((item) => item.id === selectedRecordingId) ?? null,
+    [recordings, selectedRecordingId],
+  );
+
+  const activeBoundaries = useMemo(() => selectedRecording?.boundaries ?? [], [selectedRecording]);
+
+  const playbackBoundaryIndex = useMemo(
+    () => activeBoundaries.findIndex((item) => currentMs >= item.startMs && currentMs <= item.endMs),
+    [activeBoundaries, currentMs],
+  );
+
+  const effectiveBoundaryIndex = playbackBoundaryIndex >= 0 ? playbackBoundaryIndex : focusedBoundaryIndex;
+  const focusedBoundary = activeBoundaries[effectiveBoundaryIndex] ?? null;
+
+  useEffect(() => {
+    if (!bookId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPesukim() {
+      setLoadingPesukim(true);
+      try {
+        const response = await fetch(`/api/text/pesukim?bookId=${encodeURIComponent(bookId)}`);
+        const data = await response.json();
+        if (!cancelled) {
+          setBookPesukim(data.pesukim ?? []);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingPesukim(false);
+        }
+      }
+    }
+
+    loadPesukim();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId]);
+
+  useEffect(() => {
+    if (!pasukId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadRecordings() {
+      setLoadingRecordings(true);
+      try {
+        const response = await fetch(`/api/recordings?pasukId=${encodeURIComponent(pasukId)}`);
+        const data = await response.json();
+        if (!cancelled) {
+          const nextRecordings = (data.recordings ?? []) as RecordingItem[];
+          setRecordings(nextRecordings);
+          setSelectedRecordingId(nextRecordings[0]?.id ?? "");
+          setFocusedBoundaryIndex(0);
+          setCurrentMs(0);
+          setSegmentStopMs(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingRecordings(false);
+        }
+      }
+    }
+
+    loadRecordings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pasukId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const tick = () => {
+      setCurrentMs(audio.currentTime * 1000);
+      if (!audio.paused && !audio.ended) {
+        rafRef.current = window.requestAnimationFrame(tick);
+      }
+    };
+
+    const onPlay = () => {
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    const onPause = () => {
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setCurrentMs(audio.currentTime * 1000);
+    };
+
+    const onEnded = () => {
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setCurrentMs(audio.duration * 1000);
+      segmentStopRef.current = null;
+      setSegmentStopMs(null);
+    };
+
+    const onTimeUpdate = () => {
+      const stopMs = segmentStopRef.current;
+      if (stopMs == null) {
+        return;
+      }
+
+      const current = audio.currentTime * 1000;
+      if (current >= stopMs) {
+        audio.pause();
+        audio.currentTime = stopMs / 1000;
+        setCurrentMs(stopMs);
+        segmentStopRef.current = null;
+        setSegmentStopMs(null);
+      }
+    };
+
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [selectedRecordingId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || segmentStopMs == null) {
+      return;
+    }
+
+    const current = audio.currentTime * 1000;
+    if (current >= segmentStopMs) {
+      audio.pause();
+      audio.currentTime = segmentStopMs / 1000;
+      setCurrentMs(segmentStopMs);
+      setSegmentStopMs(null);
+    }
+  }, [currentMs, segmentStopMs]);
+
+  function handleWorkChange(nextWorkId: string) {
+    setWorkId(nextWorkId);
+    setBookId("");
+    setChapterId("");
+    setPasukId("");
+    setBookPesukim([]);
+    setRecordings([]);
+    setSelectedRecordingId("");
+  }
+
+  function handleBookChange(nextBookId: string) {
+    setBookId(nextBookId);
+    setChapterId("");
+    setPasukId("");
+    setBookPesukim([]);
+    setRecordings([]);
+    setSelectedRecordingId("");
+  }
+
+  function handleChapterChange(nextChapterId: string) {
+    setChapterId(nextChapterId);
+    setPasukId("");
+    setRecordings([]);
+    setSelectedRecordingId("");
+  }
+
+  function handlePasukChange(nextPasukId: string) {
+    setPasukId(nextPasukId);
+    setRecordings([]);
+    setSelectedRecordingId("");
+    setFocusedBoundaryIndex(0);
+    setCurrentMs(0);
+    setSegmentStopMs(null);
+  }
+
+  function jumpToBoundary(index: number, shouldPlay = false) {
+    const boundary = activeBoundaries[index];
+    const audio = audioRef.current;
+    if (!boundary || !audio) return;
+
+    audio.currentTime = boundary.startMs / 1000;
+    setCurrentMs(boundary.startMs);
+    setFocusedBoundaryIndex(index);
+    segmentStopRef.current = null;
+    setSegmentStopMs(null);
+
+    if (shouldPlay) {
+      audio.play().catch(() => undefined);
+    }
+  }
+
+  function playCurrentPasuk() {
+    const audio = audioRef.current;
+    const boundary = focusedBoundary;
+    if (!audio || !boundary) return;
+
+    audio.pause();
+    audio.currentTime = boundary.startMs / 1000;
+    setCurrentMs(boundary.startMs);
+    segmentStopRef.current = boundary.endMs;
+    setSegmentStopMs(boundary.endMs);
+    audio.play().catch(() => undefined);
+  }
+
+  function playWholeRecording() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    segmentStopRef.current = null;
+    setSegmentStopMs(null);
+    if (focusedBoundary) {
+      audio.currentTime = focusedBoundary.startMs / 1000;
+      setCurrentMs(focusedBoundary.startMs);
+    }
+    audio.play().catch(() => undefined);
+  }
+
+  function seekWithinPasuk(nextMs: number) {
+    const audio = audioRef.current;
+    const boundary = focusedBoundary;
+    if (!audio || !boundary) return;
+
+    const clamped = clamp(nextMs, boundary.startMs, boundary.endMs);
+    audio.currentTime = clamped / 1000;
+    setCurrentMs(clamped);
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
+      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <h2 className="text-lg font-bold text-orange-950">Choose Text</h2>
+        <div className="mt-4 grid gap-3">
+          <label className="text-sm font-semibold text-orange-950">
+            Work
+            <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingLibrary} onChange={(event) => handleWorkChange(event.target.value)} value={workId}>
+              <option value="">Select work</option>
+              {works.map((work) => (
+                <option key={work.id} value={work.id}>{work.titleEn} - {work.titleHe}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm font-semibold text-orange-950">
+            Book
+            <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={!selectedWork} onChange={(event) => handleBookChange(event.target.value)} value={bookId}>
+              <option value="">Select book</option>
+              {selectedWork?.books.map((book) => (
+                <option key={book.id} value={book.id}>{book.titleEn}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm font-semibold text-orange-950">
+            Chapter
+            <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={!selectedBook} onChange={(event) => handleChapterChange(event.target.value)} value={chapterId}>
+              <option value="">All chapters</option>
+              {selectedBook?.chapters.map((chapter) => (
+                <option key={chapter.id} value={chapter.id}>Chapter {chapter.number}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm font-semibold text-orange-950">
+            Pasuk
+            <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || chapterPesukim.length === 0} onChange={(event) => handlePasukChange(event.target.value)} value={pasukId}>
+              <option value="">Select pasuk</option>
+              {chapterPesukim.map((pasuk) => (
+                <option key={pasuk.id} value={pasuk.id}>{pasuk.ref}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-5">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-orange-900">Approved Recordings</h3>
+          {loadingRecordings ? (
+            <p className="mt-2 text-sm text-orange-900/70">Loading recordings...</p>
+          ) : recordings.length === 0 ? (
+            <p className="mt-2 text-sm text-orange-900/70">No approved recordings found for this pasuk yet.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {recordings.map((recording) => (
+                <li key={recording.id}>
+                  <button
+                    className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
+                      selectedRecordingId === recording.id
+                        ? "border-orange-700 bg-orange-100"
+                        : "border-orange-900/20 bg-white hover:bg-orange-50"
+                    }`}
+                    onClick={() => {
+                      setSelectedRecordingId(recording.id);
+                      setFocusedBoundaryIndex(0);
+                      setCurrentMs(0);
+                      setSegmentStopMs(null);
+                    }}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-orange-950">{recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${
+                        recording.matchType === "primary"
+                          ? "bg-lime-100 text-lime-900"
+                          : recording.matchType === "boundary"
+                            ? "bg-amber-100 text-amber-900"
+                            : "bg-zinc-100 text-zinc-800"
+                      }`}>
+                        {recording.matchType}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-orange-900/70">
+                      By {recording.user.name ?? "Anonymous"} • {recording.boundaries.length} markers
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <h2 className="text-lg font-bold text-orange-950">Playback</h2>
+        {!selectedRecording ? (
+          <p className="mt-3 text-sm text-orange-900/70">Pick a pasuk and recording to begin listening.</p>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-orange-900/80">
+              Nussach: <span className="font-semibold">{selectedRecording.nussach}</span>
+              {selectedRecording.nussachCustom ? ` (${selectedRecording.nussachCustom})` : ""}
+            </p>
+            <p className="text-sm text-orange-900/80">Duration: {ms(selectedRecording.durationMs)}</p>
+
+            <audio className="mt-3 w-full" controls preload="metadata" ref={audioRef} src={selectedRecording.publicUrl} />
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <button className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100" onClick={() => jumpToBoundary(Math.max(0, effectiveBoundaryIndex - 1), true)} type="button">
+                Prev Pasuk
+              </button>
+              <button className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100" onClick={() => jumpToBoundary(Math.min(activeBoundaries.length - 1, effectiveBoundaryIndex + 1), true)} type="button">
+                Next Pasuk
+              </button>
+              <button className="rounded-full bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-700" onClick={playCurrentPasuk} type="button">
+                Play Current Pasuk
+              </button>
+              <button className="rounded-full bg-lime-600 px-3 py-2 text-sm font-semibold text-white hover:bg-lime-700" onClick={playWholeRecording} type="button">
+                Play Full Range
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-orange-900/15 bg-orange-50/70 p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-orange-900/80">Current Time</p>
+              <p className="font-mono text-2xl font-bold text-orange-950">{ms(currentMs)}</p>
+
+              {focusedBoundary ? (
+                <>
+                  <p className="mt-2 text-sm font-semibold text-orange-950">Focused Pasuk: {focusedBoundary.pasuk.ref}</p>
+                  <input
+                    className="mt-2 w-full"
+                    max={focusedBoundary.endMs}
+                    min={focusedBoundary.startMs}
+                    onChange={(event) => seekWithinPasuk(Number(event.target.value))}
+                    type="range"
+                    value={clamp(currentMs, focusedBoundary.startMs, focusedBoundary.endMs)}
+                  />
+                  <p className="mt-1 text-xs text-orange-900/75">
+                    Seek within pasuk from {ms(focusedBoundary.startMs)} to {ms(focusedBoundary.endMs)}
+                  </p>
+                </>
+              ) : null}
+            </div>
+
+            <div className="mt-4 max-h-52 overflow-auto rounded-xl border border-orange-900/15 bg-white">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="bg-orange-100 text-left uppercase tracking-wide text-orange-900">
+                    <th className="px-3 py-2">Pasuk</th>
+                    <th className="px-3 py-2">Start</th>
+                    <th className="px-3 py-2">End</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeBoundaries.map((boundary, index) => (
+                    <tr
+                      key={`${boundary.pasukId}-${boundary.startMs}`}
+                      className={index === effectiveBoundaryIndex ? "bg-lime-50" : ""}
+                      onClick={() => jumpToBoundary(index)}
+                    >
+                      <td className="cursor-pointer px-3 py-2 font-semibold text-orange-950">{boundary.pasuk.ref}</td>
+                      <td className="px-3 py-2 font-mono text-orange-900">{ms(boundary.startMs)}</td>
+                      <td className="px-3 py-2 font-mono text-orange-900">{ms(boundary.endMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
