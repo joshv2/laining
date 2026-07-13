@@ -1,7 +1,8 @@
-import { RecordingStatus } from "@prisma/client";
+import { RecordingStatus, Role } from "@prisma/client";
 import { NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { isModeratorOrAbove } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 import { createRecordingSchema, normalizeNussach } from "@/lib/services/recording-ingestion";
 
@@ -9,15 +10,46 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   const searchParams = request.nextUrl.searchParams;
   const pasukId = searchParams.get("pasukId") || undefined;
+  const role = (session?.user?.role ?? Role.USER) as Role;
 
-  const statusFilter =
-    session?.user?.role === "MODERATOR" || session?.user?.role === "SUPERUSER"
-      ? undefined
-      : RecordingStatus.APPROVED;
+  const canSeeUnapproved = session?.user?.role ? isModeratorOrAbove(session.user.role) : false;
+  const statusFilter = canSeeUnapproved ? undefined : RecordingStatus.APPROVED;
+
+  let assignedRecordingIds: string[] = [];
+  let accessMode: "assigned-only" | "public-catalog" = "public-catalog";
+
+  if (pasukId && session?.user?.id && role === Role.USER) {
+    const assignedRecordings = await prisma.practiceAssignment.findMany({
+      where: {
+        group: {
+          enrollments: {
+            some: {
+              studentId: session.user.id,
+            },
+          },
+        },
+        recording: {
+          OR: [{ primaryPasukId: pasukId }, { boundaries: { some: { pasukId } } }],
+          status: statusFilter,
+        },
+      },
+      select: {
+        recordingId: true,
+      },
+      distinct: ["recordingId"],
+      take: 300,
+    });
+
+    assignedRecordingIds = assignedRecordings.map((assignment) => assignment.recordingId);
+    if (assignedRecordingIds.length > 0) {
+      accessMode = "assigned-only";
+    }
+  }
 
   const where = pasukId
     ? {
         status: statusFilter,
+        ...(assignedRecordingIds.length > 0 ? { id: { in: assignedRecordingIds } } : {}),
         OR: [
           { primaryPasukId: pasukId },
           {
@@ -84,7 +116,7 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return Response.json({ recordings: responseRecordings });
+  return Response.json({ recordings: responseRecordings, accessMode });
 }
 
 export async function POST(request: NextRequest) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ChapterSummary = {
   id: string;
@@ -92,19 +92,45 @@ export function SubmitRecordingForm() {
   const [chapterId, setChapterId] = useState("");
   const [startPasukId, setStartPasukId] = useState("");
   const [endPasukId, setEndPasukId] = useState("");
-  const [primaryPasukId, setPrimaryPasukId] = useState("");
   const [crossChapterEnabled, setCrossChapterEnabled] = useState(true);
 
   const [nussach, setNussach] = useState<(typeof NUSSACH_OPTIONS)[number]>("Ashkenazi");
   const [nussachCustom, setNussachCustom] = useState("");
 
+  const [audioInputMode, setAudioInputMode] = useState<"upload" | "record">("upload");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [durationMs, setDurationMs] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedPreviewUrl, setRecordedPreviewUrl] = useState<string | null>(null);
 
   const [boundaries, setBoundaries] = useState<BoundaryDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordedUrlRef = useRef<string | null>(null);
+  const ignoreNextStopRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+
+      if (recordedUrlRef.current) {
+        URL.revokeObjectURL(recordedUrlRef.current);
+        recordedUrlRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +162,7 @@ export function SubmitRecordingForm() {
 
   const selectedWork = useMemo(() => works.find((item) => item.id === workId), [works, workId]);
   const selectedBook = useMemo(() => selectedWork?.books.find((item) => item.id === bookId), [selectedWork, bookId]);
+  const primaryPasukId = useMemo(() => boundaries[0]?.pasukId ?? "", [boundaries]);
   const selectablePesukim = useMemo(() => {
     if (crossChapterEnabled || !chapterId) {
       return bookPesukim;
@@ -184,7 +211,6 @@ export function SubmitRecordingForm() {
     setChapterId("");
     setStartPasukId("");
     setEndPasukId("");
-    setPrimaryPasukId("");
     setBoundaries([]);
   }
 
@@ -194,7 +220,6 @@ export function SubmitRecordingForm() {
     setBookPesukim([]);
     setStartPasukId("");
     setEndPasukId("");
-    setPrimaryPasukId("");
     setBoundaries([]);
   }
 
@@ -216,9 +241,6 @@ export function SubmitRecordingForm() {
     }
 
     setBoundaries(existingRows);
-    if (!existingRows.some((item) => item.pasukId === primaryPasukId)) {
-      setPrimaryPasukId(existingRows[0]?.pasukId ?? "");
-    }
   }
 
   function handleStartPasukChange(nextStartPasukId: string) {
@@ -231,10 +253,6 @@ export function SubmitRecordingForm() {
 
     setStartPasukId(nextStartPasukId);
     setBoundaries(nextRows);
-
-    if (!primaryPasukId || !nextRows.some((item) => item.pasukId === primaryPasukId)) {
-      setPrimaryPasukId(nextRows[0]?.pasukId ?? "");
-    }
   }
 
   function handleEndPasukChange(nextEndPasukId: string) {
@@ -247,10 +265,43 @@ export function SubmitRecordingForm() {
 
     setEndPasukId(nextEndPasukId);
     setBoundaries(nextRows);
+  }
 
-    if (!primaryPasukId || !nextRows.some((item) => item.pasukId === primaryPasukId)) {
-      setPrimaryPasukId(nextRows[0]?.pasukId ?? "");
+  function clearRecordedPreview() {
+    if (recordedUrlRef.current) {
+      URL.revokeObjectURL(recordedUrlRef.current);
+      recordedUrlRef.current = null;
     }
+    setRecordedPreviewUrl(null);
+  }
+
+  function stopRecordingSession() {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      ignoreNextStopRef.current = true;
+      recorder.stop();
+    }
+    mediaRecorderRef.current = null;
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    recordingChunksRef.current = [];
+    setIsRecording(false);
+  }
+
+  function handleAudioModeChange(nextMode: "upload" | "record") {
+    if (nextMode === audioInputMode) {
+      return;
+    }
+
+    stopRecordingSession();
+    clearRecordedPreview();
+    setAudioInputMode(nextMode);
+    setAudioFile(null);
+    setDurationMs(0);
   }
 
   async function handleAudioSelected(file: File | null) {
@@ -275,6 +326,104 @@ export function SubmitRecordingForm() {
     }
   }
 
+  async function startBrowserRecording() {
+    setError(null);
+    setSuccessMessage(null);
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setError("Browser recording is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const preferredMimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+      ];
+      const supportedMimeType = preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = supportedMimeType
+        ? new MediaRecorder(stream, { mimeType: supportedMimeType })
+        : new MediaRecorder(stream);
+
+      recordingChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        setError("Recording failed. Please try again.");
+      };
+
+      recorder.onstop = async () => {
+        if (ignoreNextStopRef.current) {
+          ignoreNextStopRef.current = false;
+          recordingChunksRef.current = [];
+          mediaRecorderRef.current = null;
+          setIsRecording(false);
+          return;
+        }
+
+        const chunks = recordingChunksRef.current;
+        recordingChunksRef.current = [];
+
+        const blobType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: blobType });
+        const extension = blobType.includes("ogg") ? "ogg" : blobType.includes("mp4") ? "m4a" : "webm";
+        const recordedFile = new File([blob], `browser-recording-${Date.now()}.${extension}`, {
+          type: blob.type || blobType,
+        });
+
+        if (recordedUrlRef.current) {
+          URL.revokeObjectURL(recordedUrlRef.current);
+        }
+
+        const previewUrl = URL.createObjectURL(blob);
+        recordedUrlRef.current = previewUrl;
+        setRecordedPreviewUrl(previewUrl);
+
+        await handleAudioSelected(recordedFile);
+
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          mediaStreamRef.current = null;
+        }
+
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+      setIsRecording(true);
+    } catch {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+      setError("Unable to access microphone. Check browser permissions and try again.");
+      setIsRecording(false);
+    }
+  }
+
+  function stopBrowserRecording() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) {
+      return;
+    }
+
+    if (recorder.state !== "inactive") {
+      recorder.stop();
+    }
+  }
+
   function updateBoundary(index: number, field: "startMs" | "endMs", value: string) {
     setBoundaries((prev) => {
       const next = [...prev];
@@ -289,12 +438,12 @@ export function SubmitRecordingForm() {
     setSuccessMessage(null);
 
     if (!audioFile) {
-      setError("Please choose an audio file.");
+      setError(audioInputMode === "record" ? "Please record audio in the browser." : "Please choose an audio file.");
       return;
     }
 
     if (!startPasukId || !endPasukId || !primaryPasukId) {
-      setError("Please choose a pasuk range and a primary pasuk.");
+      setError("Please choose a valid pasuk range.");
       return;
     }
 
@@ -353,7 +502,7 @@ export function SubmitRecordingForm() {
           primaryPasukId,
           rangeStartPasukId: startPasukId,
           rangeEndPasukId: endPasukId,
-          source: "UPLOAD",
+          source: audioInputMode === "record" ? "BROWSER_RECORDING" : "UPLOAD",
           nussach: nussachPayload,
           nussachCustom: nussach === "Other" ? nussachCustom : undefined,
           storageKey: upload.objectKey,
@@ -385,6 +534,7 @@ export function SubmitRecordingForm() {
       setSuccessMessage("Recording submitted successfully. It is now pending moderator approval.");
       setAudioFile(null);
       setDurationMs(0);
+      clearRecordedPreview();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Submission failed.");
     } finally {
@@ -404,12 +554,9 @@ export function SubmitRecordingForm() {
     });
 
     setBoundaries(nextRows);
-    if (!nextRows.some((item) => item.pasukId === primaryPasukId)) {
-      setPrimaryPasukId(nextRows[0]?.pasukId ?? "");
-    }
   }
 
-  const canSubmit = !submitting && boundaries.length > 0 && bookPesukim.length > 0;
+  const canSubmit = !submitting && boundaries.length > 0 && bookPesukim.length > 0 && !!audioFile;
 
   return (
     <form className="space-y-8 rounded-3xl border border-orange-900/20 bg-[var(--surface)] p-6 shadow-[0_18px_45px_rgba(88,31,13,0.14)]" onSubmit={handleSubmit}>
@@ -455,7 +602,7 @@ export function SubmitRecordingForm() {
         </p>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2">
         <label className="text-sm font-semibold text-orange-950">
           Start Pasuk
           <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || selectablePesukim.length === 0} onChange={(event) => handleStartPasukChange(event.target.value)} value={startPasukId}>
@@ -474,19 +621,6 @@ export function SubmitRecordingForm() {
               <option key={pasuk.id} value={pasuk.id}>{pasuk.ref} (Ch. {pasuk.chapterNumber})</option>
             ))}
           </select>
-        </label>
-
-        <label className="text-sm font-semibold text-orange-950">
-          Anchor Pasuk
-          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={boundaries.length === 0} onChange={(event) => setPrimaryPasukId(event.target.value)} value={primaryPasukId}>
-            <option value="">Select anchor</option>
-            {boundaries.map((item) => (
-              <option key={item.pasukId} value={item.pasukId}>{item.ref}</option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-orange-900/75">
-            The anchor pasuk is used for indexing and default listing focus for this recording.
-          </p>
         </label>
       </section>
 
@@ -507,10 +641,68 @@ export function SubmitRecordingForm() {
       </section>
 
       <section className="rounded-2xl border border-orange-900/15 bg-orange-50/70 p-4">
-        <label className="text-sm font-semibold text-orange-950">
-          Audio File
-          <input className="mt-2 block w-full cursor-pointer rounded-xl border border-orange-900/20 bg-white px-3 py-2 file:mr-3 file:rounded-full file:border-0 file:bg-orange-200 file:px-3 file:py-1 file:text-sm file:font-semibold" onChange={(event) => handleAudioSelected(event.target.files?.[0] ?? null)} type="file" accept="audio/*" />
-        </label>
+        <fieldset>
+          <legend className="text-sm font-semibold text-orange-950">Audio Input Mode</legend>
+          <div className="mt-2 flex flex-wrap gap-3">
+            <label className="inline-flex items-center gap-2 rounded-full border border-orange-900/20 bg-white px-3 py-2 text-sm font-semibold text-orange-950">
+              <input
+                checked={audioInputMode === "upload"}
+                name="audio-input-mode"
+                onChange={() => handleAudioModeChange("upload")}
+                type="radio"
+                value="upload"
+              />
+              Upload file
+            </label>
+            <label className="inline-flex items-center gap-2 rounded-full border border-orange-900/20 bg-white px-3 py-2 text-sm font-semibold text-orange-950">
+              <input
+                checked={audioInputMode === "record"}
+                name="audio-input-mode"
+                onChange={() => handleAudioModeChange("record")}
+                type="radio"
+                value="record"
+              />
+              Record in browser
+            </label>
+          </div>
+        </fieldset>
+
+        {audioInputMode === "upload" ? (
+          <label className="mt-4 block text-sm font-semibold text-orange-950">
+            Audio File
+            <input className="mt-2 block w-full cursor-pointer rounded-xl border border-orange-900/20 bg-white px-3 py-2 file:mr-3 file:rounded-full file:border-0 file:bg-orange-200 file:px-3 file:py-1 file:text-sm file:font-semibold" onChange={(event) => handleAudioSelected(event.target.files?.[0] ?? null)} type="file" accept="audio/*" />
+          </label>
+        ) : (
+          <div className="mt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-full border border-orange-900/25 bg-white px-4 py-2 text-sm font-semibold text-orange-950 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isRecording || submitting}
+                onClick={startBrowserRecording}
+                type="button"
+              >
+                Start Browser Recording
+              </button>
+              <button
+                className="rounded-full bg-orange-700 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-800 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!isRecording}
+                onClick={stopBrowserRecording}
+                type="button"
+              >
+                Stop Recording
+              </button>
+              <span className="text-xs font-semibold uppercase tracking-wider text-orange-900/75">
+                {isRecording ? "Recording..." : "Ready to record"}
+              </span>
+            </div>
+            {recordedPreviewUrl ? (
+              <div className="mt-3 rounded-xl border border-orange-900/15 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-orange-900/75">Recorded Preview</p>
+                <audio className="mt-2 w-full" controls preload="metadata" src={recordedPreviewUrl} />
+              </div>
+            ) : null}
+          </div>
+        )}
         <p className="mt-2 text-xs text-orange-900/75">Detected duration: {durationMs ? `${durationMs} ms` : "Not available yet"}</p>
       </section>
 

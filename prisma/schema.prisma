@@ -9,8 +9,14 @@ datasource db {
 
 enum Role {
   USER
+  TEACHER
   MODERATOR
   SUPERUSER
+}
+
+enum RecordingVisibility {
+  PUBLIC
+  ASSIGNMENT_ONLY
 }
 
 enum UiLanguage {
@@ -57,6 +63,12 @@ model User {
   votes              Vote[]
   moderationActions  ModerationDecision[] @relation("ModeratorActions")
   approvedRecordings Recording[]          @relation("RecordingApprovals")
+  teacherGroups      ClassGroup[]         @relation("TeacherGroups")
+  classEnrollments   ClassEnrollment[]    @relation("StudentEnrollments")
+  sentInvites        TeacherInvite[]      @relation("TeacherInvites")
+  acceptedInvites    TeacherInvite[]      @relation("AcceptedTeacherInvites")
+  createdAssignments PracticeAssignment[] @relation("TeacherAssignments")
+  playbackEvents     PlaybackEvent[]
 }
 
 model Account {
@@ -144,6 +156,7 @@ model Pasuk {
   recordings   Recording[]     @relation("PrimaryPasuk")
   startsRange  Recording[]     @relation("RangeStart")
   endsRange    Recording[]     @relation("RangeEnd")
+  playbackEvents PlaybackEvent[]
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   PortionPasuk PortionPasuk[]
@@ -191,6 +204,7 @@ model Recording {
   storageKey          String
   publicUrl           String
   durationMs          Int
+  visibility          RecordingVisibility   @default(PUBLIC)
   status              RecordingStatus      @default(PENDING_APPROVAL)
   moderationNotes     String?
   submittedAt         DateTime             @default(now())
@@ -201,6 +215,8 @@ model Recording {
   boundaries          PasukBoundary[]
   votes               Vote[]
   moderationHistory   ModerationDecision[]
+  assignments         PracticeAssignment[]
+  playbackEvents      PlaybackEvent[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -248,6 +264,88 @@ model ModerationDecision {
 
   @@index([recordingId, createdAt])
   @@index([moderatorId, createdAt])
+}
+
+model ClassGroup {
+  id          String              @id @default(cuid())
+  name        String
+  teacherId   String
+  teacher     User                @relation("TeacherGroups", fields: [teacherId], references: [id], onDelete: Cascade)
+  enrollments ClassEnrollment[]
+  invites     TeacherInvite[]
+  assignments PracticeAssignment[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([teacherId, createdAt])
+}
+
+model ClassEnrollment {
+  id        String    @id @default(cuid())
+  groupId   String
+  studentId String
+  group     ClassGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student   User      @relation("StudentEnrollments", fields: [studentId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@unique([groupId, studentId])
+  @@index([studentId, createdAt])
+}
+
+model TeacherInvite {
+  id               String     @id @default(cuid())
+  teacherId        String
+  groupId          String
+  email            String
+  token            String     @unique
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  createdAt        DateTime   @default(now())
+  teacher          User       @relation("TeacherInvites", fields: [teacherId], references: [id], onDelete: Cascade)
+  group            ClassGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  acceptedByUser   User?      @relation("AcceptedTeacherInvites", fields: [acceptedByUserId], references: [id])
+
+  @@index([groupId, createdAt])
+  @@index([email, expiresAt])
+}
+
+model PracticeAssignment {
+  id                  String          @id @default(cuid())
+  groupId             String
+  recordingId         String
+  assignedByTeacherId String
+  instructions        String?
+  dueAt               DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  group               ClassGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  recording           Recording       @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  assignedByTeacher   User            @relation("TeacherAssignments", fields: [assignedByTeacherId], references: [id], onDelete: Cascade)
+  playbackEvents      PlaybackEvent[]
+
+  @@index([groupId, createdAt])
+  @@index([recordingId, createdAt])
+}
+
+model PlaybackEvent {
+  id            String              @id @default(cuid())
+  studentId     String
+  recordingId   String
+  assignmentId  String?
+  pasukId       String?
+  eventType     String
+  positionMs    Int?
+  durationMs    Int?
+  occurredAt    DateTime            @default(now())
+  student       User                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recording     Recording           @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  assignment    PracticeAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  pasuk         Pasuk?              @relation(fields: [pasukId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, occurredAt])
+  @@index([recordingId, occurredAt])
+  @@index([assignmentId, occurredAt])
 }
 
 model PaywalledAsset {

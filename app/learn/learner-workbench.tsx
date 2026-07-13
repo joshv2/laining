@@ -60,12 +60,24 @@ type RecordingItem = {
   matchType: "primary" | "boundary" | "none";
 };
 
+type RecordingAccessMode = "assigned-only" | "public-catalog";
+type PlaybackEventType = "PLAY" | "PAUSE" | "ENDED" | "PASUK_REPLAY";
+
 function ms(value: number): string {
   return `${Math.max(0, Math.round(value))} ms`;
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function getBoundaryIndexForPasuk(recording: RecordingItem | null | undefined, selectedPasukId: string): number {
+  if (!recording || !selectedPasukId) {
+    return 0;
+  }
+
+  const matchIndex = recording.boundaries.findIndex((item) => item.pasukId === selectedPasukId);
+  return matchIndex >= 0 ? matchIndex : 0;
 }
 
 export function LearnerWorkbench() {
@@ -76,6 +88,7 @@ export function LearnerWorkbench() {
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [loadingPesukim, setLoadingPesukim] = useState(false);
   const [loadingRecordings, setLoadingRecordings] = useState(false);
+  const [recordingAccessMode, setRecordingAccessMode] = useState<RecordingAccessMode>("public-catalog");
 
   const [workId, setWorkId] = useState("");
   const [bookId, setBookId] = useState("");
@@ -84,6 +97,7 @@ export function LearnerWorkbench() {
 
   const [selectedRecordingId, setSelectedRecordingId] = useState("");
   const [currentMs, setCurrentMs] = useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [focusedBoundaryIndex, setFocusedBoundaryIndex] = useState(0);
   const [segmentStopMs, setSegmentStopMs] = useState<number | null>(null);
 
@@ -130,13 +144,22 @@ export function LearnerWorkbench() {
   );
 
   const activeBoundaries = useMemo(() => selectedRecording?.boundaries ?? [], [selectedRecording]);
+  const selectedPasukBoundaryIndex = useMemo(
+    () => getBoundaryIndexForPasuk(selectedRecording, pasukId),
+    [selectedRecording, pasukId],
+  );
 
   const playbackBoundaryIndex = useMemo(
     () => activeBoundaries.findIndex((item) => currentMs >= item.startMs && currentMs <= item.endMs),
     [activeBoundaries, currentMs],
   );
 
-  const effectiveBoundaryIndex = playbackBoundaryIndex >= 0 ? playbackBoundaryIndex : focusedBoundaryIndex;
+  const effectiveBoundaryIndex =
+    isAudioPlaying && playbackBoundaryIndex >= 0
+      ? playbackBoundaryIndex
+      : pasukId
+        ? selectedPasukBoundaryIndex
+        : focusedBoundaryIndex;
   const focusedBoundary = activeBoundaries[effectiveBoundaryIndex] ?? null;
 
   useEffect(() => {
@@ -182,10 +205,15 @@ export function LearnerWorkbench() {
         const data = await response.json();
         if (!cancelled) {
           const nextRecordings = (data.recordings ?? []) as RecordingItem[];
+          const nextAccessMode =
+            data.accessMode === "assigned-only" ? ("assigned-only" as const) : ("public-catalog" as const);
+          const nextSelectedRecording = nextRecordings[0] ?? null;
           setRecordings(nextRecordings);
-          setSelectedRecordingId(nextRecordings[0]?.id ?? "");
-          setFocusedBoundaryIndex(0);
+          setRecordingAccessMode(nextAccessMode);
+          setSelectedRecordingId(nextSelectedRecording?.id ?? "");
+          setFocusedBoundaryIndex(getBoundaryIndexForPasuk(nextSelectedRecording, pasukId));
           setCurrentMs(0);
+          segmentStopRef.current = null;
           setSegmentStopMs(null);
         }
       } finally {
@@ -206,6 +234,26 @@ export function LearnerWorkbench() {
     const audio = audioRef.current;
     if (!audio) return;
 
+    const trackPlaybackEvent = (eventType: PlaybackEventType, extra?: { pasukId?: string; positionMs?: number; durationMs?: number }) => {
+      if (!selectedRecordingId) {
+        return;
+      }
+
+      void fetch("/api/playback/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          recordingId: selectedRecordingId,
+          eventType,
+          pasukId: extra?.pasukId,
+          positionMs: extra?.positionMs,
+          durationMs: extra?.durationMs,
+        }),
+      }).catch(() => undefined);
+    };
+
     const tick = () => {
       setCurrentMs(audio.currentTime * 1000);
       if (!audio.paused && !audio.ended) {
@@ -214,6 +262,8 @@ export function LearnerWorkbench() {
     };
 
     const onPlay = () => {
+      setIsAudioPlaying(true);
+      trackPlaybackEvent("PLAY", { positionMs: Math.round(audio.currentTime * 1000) });
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
       }
@@ -221,6 +271,8 @@ export function LearnerWorkbench() {
     };
 
     const onPause = () => {
+      setIsAudioPlaying(false);
+      trackPlaybackEvent("PAUSE", { positionMs: Math.round(audio.currentTime * 1000) });
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -229,6 +281,11 @@ export function LearnerWorkbench() {
     };
 
     const onEnded = () => {
+      setIsAudioPlaying(false);
+      trackPlaybackEvent("ENDED", {
+        positionMs: Math.round(audio.duration * 1000),
+        durationMs: selectedRecording?.durationMs,
+      });
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -269,7 +326,7 @@ export function LearnerWorkbench() {
         rafRef.current = null;
       }
     };
-  }, [selectedRecordingId]);
+  }, [selectedRecording?.durationMs, selectedRecordingId]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -293,6 +350,7 @@ export function LearnerWorkbench() {
     setPasukId("");
     setBookPesukim([]);
     setRecordings([]);
+    setRecordingAccessMode("public-catalog");
     setSelectedRecordingId("");
   }
 
@@ -302,6 +360,7 @@ export function LearnerWorkbench() {
     setPasukId("");
     setBookPesukim([]);
     setRecordings([]);
+    setRecordingAccessMode("public-catalog");
     setSelectedRecordingId("");
   }
 
@@ -309,12 +368,14 @@ export function LearnerWorkbench() {
     setChapterId(nextChapterId);
     setPasukId("");
     setRecordings([]);
+    setRecordingAccessMode("public-catalog");
     setSelectedRecordingId("");
   }
 
   function handlePasukChange(nextPasukId: string) {
     setPasukId(nextPasukId);
     setRecordings([]);
+    setRecordingAccessMode("public-catalog");
     setSelectedRecordingId("");
     setFocusedBoundaryIndex(0);
     setCurrentMs(0);
@@ -339,26 +400,38 @@ export function LearnerWorkbench() {
 
   function playCurrentPasuk() {
     const audio = audioRef.current;
-    const boundary = focusedBoundary;
+    const boundary = activeBoundaries[selectedPasukBoundaryIndex] ?? focusedBoundary;
     if (!audio || !boundary) return;
 
     audio.pause();
     audio.currentTime = boundary.startMs / 1000;
     setCurrentMs(boundary.startMs);
+    setFocusedBoundaryIndex(selectedPasukBoundaryIndex);
     segmentStopRef.current = boundary.endMs;
     setSegmentStopMs(boundary.endMs);
+    void fetch("/api/playback/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        recordingId: selectedRecordingId,
+        eventType: "PASUK_REPLAY",
+        pasukId: boundary.pasukId,
+        positionMs: boundary.startMs,
+      }),
+    }).catch(() => undefined);
     audio.play().catch(() => undefined);
   }
 
   function playWholeRecording() {
     const audio = audioRef.current;
     if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+    setCurrentMs(0);
     segmentStopRef.current = null;
     setSegmentStopMs(null);
-    if (focusedBoundary) {
-      audio.currentTime = focusedBoundary.startMs / 1000;
-      setCurrentMs(focusedBoundary.startMs);
-    }
     audio.play().catch(() => undefined);
   }
 
@@ -420,6 +493,13 @@ export function LearnerWorkbench() {
 
         <div className="mt-5">
           <h3 className="text-sm font-bold uppercase tracking-wider text-orange-900">Approved Recordings</h3>
+          {pasukId ? (
+            <p className="mt-1 text-xs text-orange-900/70">
+              {recordingAccessMode === "assigned-only"
+                ? "Showing teacher-assigned recordings for this pasuk."
+                : "Showing the public recording catalog for this pasuk."}
+            </p>
+          ) : null}
           {loadingRecordings ? (
             <p className="mt-2 text-sm text-orange-900/70">Loading recordings...</p>
           ) : recordings.length === 0 ? (
@@ -436,8 +516,9 @@ export function LearnerWorkbench() {
                     }`}
                     onClick={() => {
                       setSelectedRecordingId(recording.id);
-                      setFocusedBoundaryIndex(0);
+                      setFocusedBoundaryIndex(getBoundaryIndexForPasuk(recording, pasukId));
                       setCurrentMs(0);
+                      segmentStopRef.current = null;
                       setSegmentStopMs(null);
                     }}
                     type="button"
@@ -476,6 +557,9 @@ export function LearnerWorkbench() {
               {selectedRecording.nussachCustom ? ` (${selectedRecording.nussachCustom})` : ""}
             </p>
             <p className="text-sm text-orange-900/80">Duration: {ms(selectedRecording.durationMs)}</p>
+            <p className="text-sm text-orange-900/80">
+              Covers Pesukim: {activeBoundaries.map((item) => item.pasuk.ref).join(", ")}
+            </p>
 
             <audio className="mt-3 w-full" controls preload="metadata" ref={audioRef} src={selectedRecording.publicUrl} />
 

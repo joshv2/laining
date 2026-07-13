@@ -2,8 +2,9 @@ import Link from "next/link";
 import { Role } from "@prisma/client";
 
 import { SignOutButton } from "@/app/signout-button";
+import { ActivateTeacherButton } from "@/app/teacher/activate-teacher-button";
 import { auth } from "@/lib/auth";
-import { isModeratorOrAbove, isSuperuser } from "@/lib/auth/roles";
+import { isModeratorOrAbove, isSuperuser, isTeacher } from "@/lib/auth/roles";
 
 const highlights = [
   "Pasuk-level seeking and full-portion playback",
@@ -60,6 +61,11 @@ export default async function Home() {
                   <Link className="rounded-full bg-white px-3 py-1 text-xs font-bold hover:bg-orange-50" href="/submit">
                     Submit New Recording
                   </Link>
+                  {isTeacher(role) ? (
+                    <Link className="rounded-full bg-white px-3 py-1 text-xs font-bold hover:bg-orange-50" href="/teacher">
+                      Teacher Dashboard
+                    </Link>
+                  ) : null}
                   {isModeratorOrAbove(role) ? (
                     <Link className="rounded-full bg-white px-3 py-1 text-xs font-bold hover:bg-orange-50" href="/moderation">
                       Moderation Queue
@@ -77,6 +83,17 @@ export default async function Home() {
                 </span>
               )}
             </div>
+            {signedIn && role === Role.USER ? (
+              <div className="rounded-2xl border border-orange-900/15 bg-orange-50/70 p-4 text-sm text-orange-900/85">
+                <p className="font-semibold text-orange-950">Teaching Bnei/Bnot Mitzvah?</p>
+                <p className="mt-1">
+                  Activate teacher mode to create classes, invite students, and assign recordings.
+                </p>
+                <div className="mt-3">
+                  <ActivateTeacherButton />
+                </div>
+              </div>
+            ) : null}
             <h1 className="text-4xl font-bold leading-tight text-[var(--foreground)] md:text-6xl">
               Learn every pasuk with real voices and collaborative precision.
             </h1>
