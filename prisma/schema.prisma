@@ -67,7 +67,10 @@ model User {
   classEnrollments   ClassEnrollment[]    @relation("StudentEnrollments")
   sentInvites        TeacherInvite[]      @relation("TeacherInvites")
   acceptedInvites    TeacherInvite[]      @relation("AcceptedTeacherInvites")
+  directTeacherLinks  TeacherStudentLink[] @relation("DirectTeacherLinks")
+  directStudentLinks  TeacherStudentLink[] @relation("DirectStudentLinks")
   createdAssignments PracticeAssignment[] @relation("TeacherAssignments")
+  playbackAsTeacher   PlaybackEvent[]      @relation("PlaybackTeacher")
   playbackEvents     PlaybackEvent[]
 }
 
@@ -295,7 +298,7 @@ model ClassEnrollment {
 model TeacherInvite {
   id               String     @id @default(cuid())
   teacherId        String
-  groupId          String
+  groupId          String?
   email            String
   token            String     @unique
   expiresAt        DateTime
@@ -303,11 +306,28 @@ model TeacherInvite {
   acceptedByUserId String?
   createdAt        DateTime   @default(now())
   teacher          User       @relation("TeacherInvites", fields: [teacherId], references: [id], onDelete: Cascade)
-  group            ClassGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group            ClassGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
   acceptedByUser   User?      @relation("AcceptedTeacherInvites", fields: [acceptedByUserId], references: [id])
+  directLink       TeacherStudentLink?
 
+  @@index([teacherId, createdAt])
   @@index([groupId, createdAt])
   @@index([email, expiresAt])
+}
+
+model TeacherStudentLink {
+  id        String   @id @default(cuid())
+  teacherId String
+  studentId String
+  inviteId  String?  @unique
+  createdAt DateTime @default(now())
+  teacher   User     @relation("DirectTeacherLinks", fields: [teacherId], references: [id], onDelete: Cascade)
+  student   User     @relation("DirectStudentLinks", fields: [studentId], references: [id], onDelete: Cascade)
+  invite    TeacherInvite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@unique([teacherId, studentId])
+  @@index([studentId, createdAt])
+  @@index([teacherId, createdAt])
 }
 
 model PracticeAssignment {
@@ -331,6 +351,7 @@ model PracticeAssignment {
 model PlaybackEvent {
   id            String              @id @default(cuid())
   studentId     String
+  teacherId     String?
   recordingId   String
   assignmentId  String?
   pasukId       String?
@@ -339,11 +360,13 @@ model PlaybackEvent {
   durationMs    Int?
   occurredAt    DateTime            @default(now())
   student       User                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacher       User?               @relation("PlaybackTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
   recording     Recording           @relation(fields: [recordingId], references: [id], onDelete: Cascade)
   assignment    PracticeAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
   pasuk         Pasuk?              @relation(fields: [pasukId], references: [id], onDelete: SetNull)
 
   @@index([studentId, occurredAt])
+  @@index([teacherId, occurredAt])
   @@index([recordingId, occurredAt])
   @@index([assignmentId, occurredAt])
 }

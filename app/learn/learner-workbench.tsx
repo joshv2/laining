@@ -41,6 +41,8 @@ type RecordingBoundary = {
   pasuk: {
     ref: string;
     number: number;
+    hebrewText: string;
+    englishText: string | null;
   };
 };
 
@@ -63,6 +65,37 @@ type RecordingItem = {
 type RecordingAccessMode = "assigned-only" | "public-catalog";
 type PlaybackEventType = "PLAY" | "PAUSE" | "ENDED" | "PASUK_REPLAY";
 
+type StudentAssignment = {
+  id: string;
+  dueAt: string | null;
+  instructions: string | null;
+  createdAt: string;
+  group: {
+    id: string;
+    name: string;
+  };
+  assignedByTeacher: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  };
+  recording: {
+    id: string;
+    nussach: string;
+    nussachCustom: string | null;
+    primaryPasuk: {
+      id: string;
+      ref: string;
+      chapterId: string;
+      chapterNumber: number;
+      bookId: string;
+      bookTitleEn: string;
+      workId: string;
+      workTitleEn: string;
+    };
+  };
+};
+
 function ms(value: number): string {
   return `${Math.max(0, Math.round(value))} ms`;
 }
@@ -80,14 +113,43 @@ function getBoundaryIndexForPasuk(recording: RecordingItem | null | undefined, s
   return matchIndex >= 0 ? matchIndex : 0;
 }
 
+function splitHebrewWords(text: string): string[] {
+  return text
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+}
+
+function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: number): number {
+  if (!boundary) {
+    return -1;
+  }
+
+  const words = splitHebrewWords(boundary.pasuk.hebrewText);
+  if (words.length === 0) {
+    return -1;
+  }
+
+  const durationMs = boundary.endMs - boundary.startMs;
+  if (durationMs <= 0) {
+    return 0;
+  }
+
+  const progress = clamp((currentMs - boundary.startMs) / durationMs, 0, 0.9999);
+  return Math.min(words.length - 1, Math.floor(progress * words.length));
+}
+
 export function LearnerWorkbench() {
   const [works, setWorks] = useState<WorkSummary[]>([]);
   const [bookPesukim, setBookPesukim] = useState<Pasuk[]>([]);
   const [recordings, setRecordings] = useState<RecordingItem[]>([]);
+  const [assignments, setAssignments] = useState<StudentAssignment[]>([]);
 
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [loadingPesukim, setLoadingPesukim] = useState(false);
   const [loadingRecordings, setLoadingRecordings] = useState(false);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
   const [recordingAccessMode, setRecordingAccessMode] = useState<RecordingAccessMode>("public-catalog");
 
   const [workId, setWorkId] = useState("");
@@ -124,6 +186,31 @@ export function LearnerWorkbench() {
     }
 
     loadLibrary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAssignments() {
+      setLoadingAssignments(true);
+      try {
+        const response = await fetch("/api/assignments/mine");
+        const data = await response.json();
+        if (!cancelled) {
+          setAssignments((data.assignments ?? []) as StudentAssignment[]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAssignments(false);
+        }
+      }
+    }
+
+    loadAssignments();
 
     return () => {
       cancelled = true;
@@ -445,9 +532,68 @@ export function LearnerWorkbench() {
     setCurrentMs(clamped);
   }
 
+  function openAssignment(assignment: StudentAssignment) {
+    setWorkId(assignment.recording.primaryPasuk.workId);
+    setBookId(assignment.recording.primaryPasuk.bookId);
+    setChapterId(assignment.recording.primaryPasuk.chapterId);
+    setPasukId(assignment.recording.primaryPasuk.id);
+    setRecordings([]);
+    setSelectedRecordingId("");
+    setCurrentMs(0);
+    setFocusedBoundaryIndex(0);
+    segmentStopRef.current = null;
+    setSegmentStopMs(null);
+  }
+
+  function formatDate(value: string | null): string {
+    if (!value) {
+      return "No due date";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "No due date";
+    }
+
+    return date.toLocaleDateString("en-US", {
+      timeZone: "UTC",
+    });
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
       <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <div className="mb-5 rounded-xl border border-orange-900/15 bg-orange-50/70 p-3">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-orange-900">My Assignments</h3>
+          {loadingAssignments ? (
+            <p className="mt-2 text-sm text-orange-900/75">Loading assignments...</p>
+          ) : assignments.length === 0 ? (
+            <p className="mt-2 text-sm text-orange-900/75">No assignments yet. Your teacher-assigned passages will appear here.</p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {assignments.slice(0, 8).map((assignment) => (
+                <li key={assignment.id} className="rounded-lg border border-orange-900/10 bg-white p-2">
+                  <p className="text-sm font-semibold text-orange-950">
+                    {assignment.recording.primaryPasuk.ref} - {assignment.recording.nussach}
+                    {assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}
+                  </p>
+                  <p className="mt-1 text-xs text-orange-900/75">
+                    Due: {formatDate(assignment.dueAt)} - Teacher: {assignment.assignedByTeacher.name ?? assignment.assignedByTeacher.email ?? "Teacher"}
+                  </p>
+                  {assignment.instructions ? <p className="mt-1 text-xs text-orange-900/75">{assignment.instructions}</p> : null}
+                  <button
+                    className="mt-2 rounded-full border border-orange-900/25 px-3 py-1 text-xs font-semibold hover:bg-orange-100"
+                    onClick={() => openAssignment(assignment)}
+                    type="button"
+                  >
+                    Open In Learner
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <h2 className="text-lg font-bold text-orange-950">Choose Text</h2>
         <div className="mt-4 grid gap-3">
           <label className="text-sm font-semibold text-orange-950">
@@ -599,6 +745,43 @@ export function LearnerWorkbench() {
                 </>
               ) : null}
             </div>
+
+            {recordingAccessMode === "assigned-only" && focusedBoundary ? (
+              <section className="mt-4 rounded-2xl border border-orange-900/15 bg-white p-4 shadow-[0_8px_18px_rgba(88,31,13,0.08)]">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-orange-900/75">Sing-along Mode</p>
+                    <h3 className="mt-1 text-base font-bold text-orange-950">Follow the highlighted words with the recording</h3>
+                  </div>
+                  <p className="text-xs text-orange-900/70">Teacher/student only for now</p>
+                </div>
+
+                <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
+                  <p className="text-right text-sm font-semibold text-orange-900/70">{focusedBoundary.pasuk.ref}</p>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2 text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
+                    {splitHebrewWords(focusedBoundary.pasuk.hebrewText).map((word, index) => {
+                      const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs);
+                      return (
+                        <span
+                          key={`${focusedBoundary.pasukId}-${index}-${word}`}
+                          className={`rounded-lg px-2 py-1 transition-colors ${
+                            isActive
+                              ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
+                              : "text-orange-950/70"
+                          }`}
+                        >
+                          {word}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {focusedBoundary.pasuk.englishText ? (
+                  <p className="mt-3 text-sm text-orange-900/75">Translation: {focusedBoundary.pasuk.englishText}</p>
+                ) : null}
+              </section>
+            ) : null}
 
             <div className="mt-4 max-h-52 overflow-auto rounded-xl border border-orange-900/15 bg-white">
               <table className="min-w-full text-xs">

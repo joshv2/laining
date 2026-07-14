@@ -42,6 +42,87 @@ type BoundaryDraft = {
   endMs: string;
 };
 
+async function detectAudioDurationMs(file: File): Promise<number> {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const metadataDurationSeconds = await new Promise<number>((resolve, reject) => {
+      const audio = document.createElement("audio");
+      let settled = false;
+
+      const finish = (value: number) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        audio.removeAttribute("src");
+        audio.load();
+        resolve(value);
+      };
+
+      const fail = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        audio.removeAttribute("src");
+        audio.load();
+        reject(new Error("Failed to read audio metadata."));
+      };
+
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          finish(audio.duration);
+          return;
+        }
+
+        try {
+          // Some recorded blobs report Infinity until seeking once.
+          audio.currentTime = Number.MAX_SAFE_INTEGER;
+        } catch {
+          finish(0);
+        }
+      };
+
+      audio.ontimeupdate = () => {
+        finish(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0);
+      };
+
+      audio.onerror = () => fail();
+      audio.src = objectUrl;
+    });
+
+    if (metadataDurationSeconds > 0) {
+      return Math.round(metadataDurationSeconds * 1000);
+    }
+  } catch {
+    // Fall through to Web Audio decode fallback below.
+  }
+
+  try {
+    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      return 0;
+    }
+
+    const context = new AudioContextCtor();
+    try {
+      const bytes = await file.arrayBuffer();
+      const decoded = await context.decodeAudioData(bytes.slice(0));
+      if (Number.isFinite(decoded.duration) && decoded.duration > 0) {
+        return Math.round(decoded.duration * 1000);
+      }
+    } finally {
+      await context.close();
+    }
+  } catch {
+    return 0;
+  }
+
+  return 0;
+}
+
 function buildBoundaryRows(params: {
   pesukim: Pasuk[];
   startPasukId: string;
@@ -170,6 +251,7 @@ export function SubmitRecordingForm() {
 
     return bookPesukim.filter((item) => item.chapterId === chapterId);
   }, [bookPesukim, chapterId, crossChapterEnabled]);
+  const isSinglePasukRange = Boolean(startPasukId && endPasukId && startPasukId === endPasukId);
 
   useEffect(() => {
     if (!bookId) {
@@ -311,19 +393,8 @@ export function SubmitRecordingForm() {
       return;
     }
 
-    try {
-      const url = URL.createObjectURL(file);
-      const audio = new Audio(url);
-      await new Promise<void>((resolve, reject) => {
-        audio.onloadedmetadata = () => resolve();
-        audio.onerror = () => reject(new Error("Failed to read audio metadata."));
-      });
-      const milliseconds = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0;
-      setDurationMs(milliseconds);
-      URL.revokeObjectURL(url);
-    } catch {
-      setDurationMs(0);
-    }
+    const milliseconds = await detectAudioDurationMs(file);
+    setDurationMs(milliseconds);
   }
 
   async function startBrowserRecording() {
@@ -452,18 +523,20 @@ export function SubmitRecordingForm() {
       return;
     }
 
-    const parsedBoundaries = boundaries.map((item) => ({
-      pasukId: item.pasukId,
-      startMs: Number(item.startMs),
-      endMs: Number(item.endMs),
-    }));
+    const parsedBoundaries = isSinglePasukRange
+      ? [{ pasukId: primaryPasukId, startMs: 0, endMs: durationMs }]
+      : boundaries.map((item) => ({
+          pasukId: item.pasukId,
+          startMs: Number(item.startMs),
+          endMs: Number(item.endMs),
+        }));
 
-    if (parsedBoundaries.some((item) => !Number.isFinite(item.startMs) || !Number.isFinite(item.endMs))) {
+    if (!isSinglePasukRange && parsedBoundaries.some((item) => !Number.isFinite(item.startMs) || !Number.isFinite(item.endMs))) {
       setError("Every boundary must include numeric start and end times in milliseconds.");
       return;
     }
 
-    if (parsedBoundaries.some((item) => item.startMs < 0 || item.endMs <= item.startMs)) {
+    if (!isSinglePasukRange && parsedBoundaries.some((item) => item.startMs < 0 || item.endMs <= item.startMs)) {
       setError("Every boundary must have start >= 0 and end > start.");
       return;
     }
@@ -556,7 +629,7 @@ export function SubmitRecordingForm() {
     setBoundaries(nextRows);
   }
 
-  const canSubmit = !submitting && boundaries.length > 0 && bookPesukim.length > 0 && !!audioFile;
+  const canSubmit = !submitting && boundaries.length > 0 && bookPesukim.length > 0 && !!audioFile && durationMs > 0;
 
   return (
     <form className="space-y-8 rounded-3xl border border-orange-900/20 bg-[var(--surface)] p-6 shadow-[0_18px_45px_rgba(88,31,13,0.14)]" onSubmit={handleSubmit}>
@@ -708,9 +781,17 @@ export function SubmitRecordingForm() {
 
       <section>
         <h2 className="text-lg font-bold text-orange-950">Pasuk Boundaries</h2>
-        <p className="mt-1 text-sm text-orange-900/80">Mark where each pasuk begins and ends in milliseconds. End times must be greater than start times.</p>
+        <p className="mt-1 text-sm text-orange-900/80">
+          {isSinglePasukRange
+            ? "Single pasuk selected. Boundaries are automatic from 0 ms to full audio duration."
+            : "Mark where each pasuk begins and ends in milliseconds. End times must be greater than start times."}
+        </p>
 
-        {boundaries.length === 0 ? (
+        {isSinglePasukRange ? (
+          <div className="mt-4 rounded-2xl border border-orange-900/20 bg-white/80 p-4 text-sm text-orange-900/80">
+            Auto boundary: 0 ms → {durationMs ? `${durationMs} ms` : "(waiting for duration)"}
+          </div>
+        ) : boundaries.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-orange-900/30 bg-white/80 p-4 text-sm text-orange-900/75">
             Select a pasuk range to generate editable boundary rows.
           </div>

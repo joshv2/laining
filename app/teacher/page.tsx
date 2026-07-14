@@ -76,7 +76,17 @@ export default async function TeacherPage() {
   const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(now.getDate() - 7);
 
-  const [groupsRaw, invitesRaw, assignmentsRaw, approvedRecordingsRaw, enrollmentsRaw, totalStudents, pendingInvites, totalAssignments, weeklyAssignmentEvents, weeklyActiveStudentsRaw] = await Promise.all([
+  const [
+    groupsRaw,
+    invitesRaw,
+    assignmentsRaw,
+    approvedRecordingsRaw,
+    enrollmentsRaw,
+    directLinksRaw,
+    teacherPlaybackEventsRaw,
+    pendingInvites,
+    totalAssignments,
+  ] = await Promise.all([
     prisma.classGroup.findMany({
       where: { teacherId: session.user.id },
       orderBy: { createdAt: "desc" },
@@ -180,12 +190,42 @@ export default async function TeacherPage() {
       },
       take: 300,
     }),
-    prisma.classEnrollment.count({
+    prisma.teacherStudentLink.findMany({
       where: {
-        group: {
-          teacherId: session.user.id,
+        teacherId: session.user.id,
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        invite: {
+          select: {
+            id: true,
+            email: true,
+            acceptedAt: true,
+          },
         },
       },
+      take: 300,
+    }),
+    prisma.playbackEvent.findMany({
+      where: {
+        teacherId: session.user.id,
+        occurredAt: {
+          gte: sevenDaysAgo,
+        },
+      },
+      orderBy: { occurredAt: "desc" },
+      select: {
+        studentId: true,
+        occurredAt: true,
+      },
+      take: 1000,
     }),
     prisma.teacherInvite.count({
       where: {
@@ -200,31 +240,6 @@ export default async function TeacherPage() {
       where: {
         assignedByTeacherId: session.user.id,
       },
-    }),
-    prisma.playbackEvent.count({
-      where: {
-        assignment: {
-          assignedByTeacherId: session.user.id,
-        },
-        occurredAt: {
-          gte: sevenDaysAgo,
-        },
-      },
-    }),
-    prisma.playbackEvent.findMany({
-      where: {
-        assignment: {
-          assignedByTeacherId: session.user.id,
-        },
-        occurredAt: {
-          gte: sevenDaysAgo,
-        },
-      },
-      distinct: ["studentId"],
-      select: {
-        studentId: true,
-      },
-      take: 500,
     }),
   ]);
 
@@ -261,6 +276,22 @@ export default async function TeacherPage() {
       })
     : [];
 
+  const uniqueStudentIds = new Set<string>();
+  for (const enrollment of enrollmentsRaw) {
+    uniqueStudentIds.add(enrollment.student.id);
+  }
+  for (const directLink of directLinksRaw) {
+    uniqueStudentIds.add(directLink.student.id);
+  }
+
+  const latestTeacherActivity = new Map<string, Date>();
+  for (const event of teacherPlaybackEventsRaw) {
+    const existingLatest = latestTeacherActivity.get(event.studentId);
+    if (!existingLatest || existingLatest.getTime() < event.occurredAt.getTime()) {
+      latestTeacherActivity.set(event.studentId, event.occurredAt);
+    }
+  }
+
   const groups = groupsRaw.map((group) => ({
     id: group.id,
     name: group.name,
@@ -278,7 +309,8 @@ export default async function TeacherPage() {
     createdAt: invite.createdAt.toISOString(),
     expiresAt: invite.expiresAt.toISOString(),
     acceptedAt: invite.acceptedAt ? invite.acceptedAt.toISOString() : null,
-    groupName: invite.group.name,
+    kind: (invite.groupId ? "class" : "direct") as "class" | "direct",
+    groupName: invite.group?.name ?? null,
     acceptedByName: invite.acceptedByUser?.name ?? null,
   }));
 
@@ -395,6 +427,16 @@ export default async function TeacherPage() {
     lastActivityAt: latestStudentActivity.get(enrollment.student.id)?.toISOString() ?? null,
   }));
 
+  const directStudents = directLinksRaw.map((link) => ({
+    id: link.id,
+    studentId: link.student.id,
+    studentName: link.student.name,
+    studentEmail: link.student.email,
+    acceptedAt: link.invite?.acceptedAt ? link.invite.acceptedAt.toISOString() : null,
+    inviteEmail: link.invite?.email ?? null,
+    lastActivityAt: latestTeacherActivity.get(link.student.id)?.toISOString() ?? null,
+  }));
+
   const approvedRecordings = approvedRecordingsRaw.map((recording) => ({
     id: recording.id,
     nussach: recording.nussach,
@@ -404,11 +446,11 @@ export default async function TeacherPage() {
   }));
 
   const analytics = {
-    totalStudents,
+    totalStudents: uniqueStudentIds.size,
     pendingInvites,
     totalAssignments,
-    weeklyAssignmentEvents,
-    weeklyActiveStudents: weeklyActiveStudentsRaw.length,
+    weeklyAssignmentEvents: teacherPlaybackEventsRaw.length,
+    weeklyActiveStudents: latestTeacherActivity.size,
   };
 
   return (
@@ -416,9 +458,9 @@ export default async function TeacherPage() {
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--ink-soft)]">Teacher Mode</p>
-          <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Class Dashboard</h1>
+          <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Teacher Dashboard</h1>
           <p className="mt-2 text-sm text-orange-900/80">
-            Create classes now. Student invites and assignment workflows are next in implementation.
+            Direct 1-on-1 tutoring is the primary flow. Classes are optional when you want to group multiple students.
           </p>
         </div>
         <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/">
@@ -426,8 +468,11 @@ export default async function TeacherPage() {
         </Link>
       </header>
 
-      <section className="mb-6 rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <h2 className="text-lg font-bold text-orange-950">Create a Class</h2>
+      <details className="mb-6 rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <summary className="cursor-pointer text-lg font-bold text-orange-950">Optional class grouping</summary>
+        <p className="mt-2 text-sm text-orange-900/80">
+          Skip this if you tutor one student at a time. Create a class only when you want a shared roster for multiple students.
+        </p>
         <form action={createClassGroup} className="mt-3 flex flex-wrap items-end gap-3">
           <label className="w-full max-w-md text-sm font-semibold text-orange-950">
             Class Name
@@ -441,17 +486,18 @@ export default async function TeacherPage() {
               type="text"
             />
           </label>
-          <button className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]" type="submit">
+          <button className="rounded-full border border-orange-900/25 bg-white px-4 py-2 text-sm font-semibold text-orange-950 hover:bg-orange-100" type="submit">
             Create Class
           </button>
         </form>
-      </section>
+      </details>
 
       <TeacherDashboardClient
         analytics={analytics}
         approvedRecordings={approvedRecordings}
         assignmentActivity={assignmentActivity}
         assignments={assignments}
+        directStudents={directStudents}
         groups={groups}
         invites={invites}
         roster={roster}

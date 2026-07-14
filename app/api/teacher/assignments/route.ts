@@ -6,7 +6,8 @@ import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 
 const createAssignmentSchema = z.object({
-  groupId: z.string().min(1),
+  groupId: z.string().min(1).optional(),
+  directStudentId: z.string().min(1).optional(),
   recordingId: z.string().min(1),
   instructions: z.string().max(2000).optional(),
   dueAt: z.string().datetime().optional(),
@@ -89,18 +90,87 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid dueAt date" }, { status: 400 });
   }
 
-  const group = await prisma.classGroup.findFirst({
-    where: {
-      id: parsed.data.groupId,
-      teacherId: session.user.id,
-    },
-    select: {
-      id: true,
-    },
-  });
+  if (!parsed.data.groupId && !parsed.data.directStudentId) {
+    return Response.json({ error: "Either groupId or directStudentId is required" }, { status: 400 });
+  }
 
-  if (!group) {
-    return Response.json({ error: "Class not found" }, { status: 404 });
+  let targetGroupId: string;
+
+  if (parsed.data.directStudentId) {
+    const directLink = await prisma.teacherStudentLink.findFirst({
+      where: {
+        teacherId: session.user.id,
+        studentId: parsed.data.directStudentId,
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!directLink) {
+      return Response.json({ error: "Direct student relationship not found" }, { status: 404 });
+    }
+
+    const directGroupName = `Direct 1-on-1: ${directLink.student.id}`;
+    const existingGroup = await prisma.classGroup.findFirst({
+      where: {
+        teacherId: session.user.id,
+        name: directGroupName,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const group =
+      existingGroup ??
+      (await prisma.classGroup.create({
+        data: {
+          teacherId: session.user.id,
+          name: directGroupName,
+        },
+        select: {
+          id: true,
+        },
+      }));
+
+    await prisma.classEnrollment.upsert({
+      where: {
+        groupId_studentId: {
+          groupId: group.id,
+          studentId: directLink.student.id,
+        },
+      },
+      create: {
+        groupId: group.id,
+        studentId: directLink.student.id,
+      },
+      update: {},
+    });
+
+    targetGroupId = group.id;
+  } else {
+    const group = await prisma.classGroup.findFirst({
+      where: {
+        id: parsed.data.groupId,
+        teacherId: session.user.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!group) {
+      return Response.json({ error: "Class not found" }, { status: 404 });
+    }
+
+    targetGroupId = group.id;
   }
 
   const recording = await prisma.recording.findFirst({
@@ -119,7 +189,7 @@ export async function POST(request: Request) {
 
   const existingAssignment = await prisma.practiceAssignment.findFirst({
     where: {
-      groupId: group.id,
+      groupId: targetGroupId,
       recordingId: recording.id,
     },
     select: {
@@ -133,7 +203,7 @@ export async function POST(request: Request) {
 
   const assignment = await prisma.practiceAssignment.create({
     data: {
-      groupId: group.id,
+      groupId: targetGroupId,
       recordingId: recording.id,
       assignedByTeacherId: session.user.id,
       instructions: parsed.data.instructions,

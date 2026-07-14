@@ -17,6 +17,10 @@ const ALLOWED_AUDIO_TYPES = new Set([
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+function normalizeMimeType(value: string): string {
+  return value.split(";")[0].trim().toLowerCase();
+}
+
 function sanitizeFileName(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -42,7 +46,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "File too large. Max size is 50MB." }, { status: 413 });
   }
 
-  if (!ALLOWED_AUDIO_TYPES.has(file.type)) {
+  const normalizedType = normalizeMimeType(file.type || "");
+
+  if (!ALLOWED_AUDIO_TYPES.has(normalizedType)) {
     return Response.json({ error: `Unsupported audio type: ${file.type || "unknown"}` }, { status: 415 });
   }
 
@@ -58,7 +64,7 @@ export async function POST(request: Request) {
     objectKey: uploaded.objectKey,
     publicUrl: uploaded.publicUrl,
     fileName: file.name,
-    mimeType: file.type,
+    mimeType: normalizedType,
     sizeBytes: file.size,
   });
 }

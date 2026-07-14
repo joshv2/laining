@@ -23,16 +23,16 @@ export default async function TeacherInvitePage({ params }: PageProps) {
   const invite = await prisma.teacherInvite.findUnique({
     where: { token },
     include: {
+      teacher: {
+        select: {
+          name: true,
+          email: true,
+        },
+      },
       group: {
         select: {
           id: true,
           name: true,
-          teacher: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
         },
       },
       acceptedByUser: {
@@ -65,16 +65,20 @@ export default async function TeacherInvitePage({ params }: PageProps) {
   const acceptedByOther = Boolean(invite.acceptedAt && invite.acceptedByUserId && invite.acceptedByUserId !== session.user.id);
   const acceptedByYou = Boolean(invite.acceptedAt && invite.acceptedByUserId === session.user.id);
   const emailMismatch = accountEmail !== inviteEmail;
+  const inviteLabel = invite.group?.name ?? "Direct 1-on-1 tutoring";
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-12">
       <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-6 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-900/70">Teacher Invite</p>
-        <h1 className="mt-2 text-2xl font-bold text-orange-950">Join {invite.group.name}</h1>
+        <h1 className="mt-2 text-2xl font-bold text-orange-950">Join {inviteLabel}</h1>
         <p className="mt-2 text-sm text-orange-900/80">
-          Teacher: {invite.group.teacher.name ?? invite.group.teacher.email ?? "Unknown"}
+          Teacher: {invite.teacher.name ?? invite.teacher.email ?? "Unknown"}
         </p>
         <p className="mt-1 text-sm text-orange-900/80">Invited email: {invite.email}</p>
+        {invite.group ? null : (
+          <p className="mt-1 text-sm text-orange-900/80">This is a direct tutoring invite. No class enrollment is required.</p>
+        )}
 
         {acceptedByYou ? (
           <p className="mt-5 rounded-xl border border-lime-200 bg-lime-50 px-4 py-3 text-sm font-semibold text-lime-900">

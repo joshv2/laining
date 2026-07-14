@@ -44,12 +44,26 @@ export async function POST(request: Request) {
     ],
     select: {
       id: true,
+      assignedByTeacherId: true,
     },
   });
+
+  const directLink = assignment
+    ? null
+    : await prisma.teacherStudentLink.findFirst({
+        where: {
+          studentId: session.user.id,
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          teacherId: true,
+        },
+      });
 
   await prisma.playbackEvent.create({
     data: {
       studentId: session.user.id,
+      teacherId: assignment?.assignedByTeacherId ?? directLink?.teacherId ?? null,
       recordingId: parsed.data.recordingId,
       assignmentId: assignment?.id,
       pasukId: parsed.data.pasukId,

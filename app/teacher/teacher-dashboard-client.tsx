@@ -28,7 +28,8 @@ type InviteSummary = {
   createdAt: string;
   expiresAt: string;
   acceptedAt: string | null;
-  groupName: string;
+  kind: "class" | "direct";
+  groupName: string | null;
   acceptedByName: string | null;
 };
 
@@ -74,6 +75,16 @@ type RosterItem = {
   lastActivityAt: string | null;
 };
 
+type DirectStudentItem = {
+  id: string;
+  studentId: string;
+  studentName: string | null;
+  studentEmail: string | null;
+  acceptedAt: string | null;
+  inviteEmail: string | null;
+  lastActivityAt: string | null;
+};
+
 type AnalyticsSummary = {
   totalStudents: number;
   pendingInvites: number;
@@ -88,6 +99,7 @@ type Props = {
   invites: InviteSummary[];
   assignments: AssignmentSummary[];
   assignmentActivity: AssignmentActivitySummary[];
+  directStudents: DirectStudentItem[];
   roster: RosterItem[];
   analytics: AnalyticsSummary;
 };
@@ -102,7 +114,9 @@ function formatDate(value: string | null): string {
     return "-";
   }
 
-  return date.toLocaleDateString();
+  return date.toLocaleDateString("en-US", {
+    timeZone: "UTC",
+  });
 }
 
 function inviteState(invite: InviteSummary): "accepted" | "expired" | "pending" {
@@ -118,7 +132,7 @@ function inviteState(invite: InviteSummary): "accepted" | "expired" | "pending" 
   return "pending";
 }
 
-export function TeacherDashboardClient({ groups, approvedRecordings, invites, assignments, assignmentActivity, roster, analytics }: Props) {
+export function TeacherDashboardClient({ groups, approvedRecordings, invites, assignments, assignmentActivity, directStudents, roster, analytics }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -155,9 +169,10 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
     const groupId = String(formData.get("groupId") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim();
     const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
+    const useDirect = groupId === "__DIRECT__";
 
-    if (!groupId || !email) {
-      throw new Error("Class and email are required.");
+    if ((!useDirect && !groupId) || !email) {
+      throw new Error("Email is required.");
     }
 
     const response = await fetch("/api/teacher/invites", {
@@ -165,7 +180,11 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ groupId, email, expiresInDays }),
+      body: JSON.stringify({
+        email,
+        expiresInDays,
+        ...(useDirect ? {} : { groupId }),
+      }),
     });
 
     await parseJson(response);
@@ -198,6 +217,34 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
 
     await parseJson(response);
     setStatusMessage("Assignment created.");
+    router.refresh();
+  }
+
+  async function handleCreateDirectAssignment(formData: FormData) {
+    const directStudentId = String(formData.get("directStudentId") ?? "").trim();
+    const recordingId = String(formData.get("recordingId") ?? "").trim();
+    const instructions = String(formData.get("instructions") ?? "").trim();
+    const dueAt = String(formData.get("dueAt") ?? "").trim();
+
+    if (!directStudentId || !recordingId) {
+      throw new Error("Student and recording are required.");
+    }
+
+    const response = await fetch("/api/teacher/assignments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        directStudentId,
+        recordingId,
+        instructions: instructions || undefined,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+      }),
+    });
+
+    await parseJson(response);
+    setStatusMessage("Direct student assignment created.");
     router.refresh();
   }
 
@@ -314,8 +361,9 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
             }}
           >
             <label className="text-sm font-semibold text-orange-950">
-              Class
-              <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue={defaultGroupId} name="groupId" required>
+              Class / Direct
+              <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue="__DIRECT__" name="groupId" required>
+                <option value="__DIRECT__">Direct 1-on-1 (no class)</option>
                 {groups.map((group) => (
                   <option key={group.id} value={group.id}>{group.name}</option>
                 ))}
@@ -402,7 +450,7 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-orange-900/75">
-                      {invite.groupName} - Expires {formatDate(invite.expiresAt)}
+                        {invite.kind === "direct" ? "Direct 1-on-1" : invite.groupName ?? "Class invite"} - Expires {formatDate(invite.expiresAt)}
                       {invite.acceptedByName ? ` - Accepted by ${invite.acceptedByName}` : ""}
                     </p>
                     {state !== "accepted" ? (
@@ -577,6 +625,59 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
                 <p className="mt-1 text-xs text-orange-900/75">
                   Students: {group.counts.students} - Invites: {group.counts.invites} - Assignments: {group.counts.assignments}
                 </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <h2 className="text-lg font-bold text-orange-950">Direct Students</h2>
+        {directStudents.length === 0 ? (
+          <p className="mt-3 text-sm text-orange-900/75">No direct 1-on-1 students yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {directStudents.map((student) => (
+              <li key={student.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
+                <p className="text-sm font-semibold text-orange-950">{student.studentName ?? student.studentEmail ?? "Student"}</p>
+                <p className="mt-1 text-xs text-orange-900/75">
+                  Invite: {student.inviteEmail ?? "Direct invite"} - Accepted: {formatDate(student.acceptedAt)} - Last activity: {formatDate(student.lastActivityAt)}
+                </p>
+                <form
+                  className="mt-3 grid gap-2 rounded-lg border border-orange-900/10 bg-orange-50/60 p-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    void withStatus(() => handleCreateDirectAssignment(formData));
+                  }}
+                >
+                  <input name="directStudentId" type="hidden" value={student.studentId} />
+                  <label className="text-xs font-semibold text-orange-950">
+                    Assign recording
+                    <select className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={defaultRecordingId} name="recordingId" required>
+                      {approvedRecordings.map((recording) => (
+                        <option key={recording.id} value={recording.id}>
+                          {recording.primaryPasukRef} - {recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-orange-950">
+                    Due Date
+                    <input className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" name="dueAt" type="date" />
+                  </label>
+                  <label className="text-xs font-semibold text-orange-950">
+                    Instructions
+                    <textarea className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" maxLength={2000} name="instructions" rows={2} />
+                  </label>
+                  <button
+                    className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-50"
+                    disabled={isPending}
+                    type="submit"
+                  >
+                    Assign To Student
+                  </button>
+                </form>
               </li>
             ))}
           </ul>

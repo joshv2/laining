@@ -56,32 +56,70 @@ export async function acceptTeacherInviteForUser(input: { token: string; userId:
             },
           });
 
-    const enrollment = await tx.classEnrollment.upsert({
-      where: {
-        groupId_studentId: {
-          groupId: invite.groupId,
-          studentId: input.userId,
-        },
-      },
-      create: {
-        groupId: invite.groupId,
-        studentId: input.userId,
-      },
-      update: {},
-      include: {
-        group: {
-          select: {
-            id: true,
-            name: true,
-            teacherId: true,
+    const directLink = invite.groupId
+      ? null
+      : await tx.teacherStudentLink.upsert({
+          where: {
+            teacherId_studentId: {
+              teacherId: invite.teacherId,
+              studentId: input.userId,
+            },
           },
-        },
-      },
-    });
+          create: {
+            teacherId: invite.teacherId,
+            studentId: input.userId,
+            inviteId: invite.id,
+          },
+          update: {
+            inviteId: invite.id,
+          },
+          include: {
+            teacher: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+            student: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        });
+
+    const enrollment = invite.groupId
+      ? await tx.classEnrollment.upsert({
+          where: {
+            groupId_studentId: {
+              groupId: invite.groupId,
+              studentId: input.userId,
+            },
+          },
+          create: {
+            groupId: invite.groupId,
+            studentId: input.userId,
+          },
+          update: {},
+          include: {
+            group: {
+              select: {
+                id: true,
+                name: true,
+                teacherId: true,
+              },
+            },
+          },
+        })
+      : null;
 
     return {
       acceptedInvite,
       enrollment,
+      directLink,
       invite,
     };
   });

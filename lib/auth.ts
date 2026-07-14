@@ -14,6 +14,11 @@ const providers =
         Google({
           clientId: googleId,
           clientSecret: googleSecret,
+          authorization: {
+            params: {
+              prompt: "select_account",
+            },
+          },
         }),
       ]
     : [];

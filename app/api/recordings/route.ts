@@ -81,6 +81,8 @@ export async function GET(request: NextRequest) {
             select: {
               ref: true,
               number: true,
+              hebrewText: true,
+              englishText: true,
             },
           },
         },
