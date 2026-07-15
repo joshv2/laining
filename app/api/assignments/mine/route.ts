@@ -1,5 +1,3 @@
-import { RecordingStatus } from "@prisma/client";
-
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 
@@ -19,9 +17,6 @@ export async function GET() {
           },
         },
       },
-      recording: {
-        status: RecordingStatus.APPROVED,
-      },
     },
     orderBy: [
       {
@@ -36,6 +31,7 @@ export async function GET() {
         select: {
           id: true,
           name: true,
+          teacherId: true,
         },
       },
       assignedByTeacher: {
@@ -50,6 +46,8 @@ export async function GET() {
           id: true,
           nussach: true,
           nussachCustom: true,
+          status: true,
+          userId: true,
           primaryPasuk: {
             select: {
               id: true,
@@ -81,7 +79,15 @@ export async function GET() {
     take: 200,
   });
 
-  const responseAssignments = assignments.map((assignment) => ({
+  const visibleAssignments = assignments.filter((assignment) => {
+    if (assignment.recording.status === "APPROVED") {
+      return true;
+    }
+
+    return assignment.recording.userId === assignment.group.teacherId;
+  });
+
+  const responseAssignments = visibleAssignments.map((assignment) => ({
     id: assignment.id,
     dueAt: assignment.dueAt ? assignment.dueAt.toISOString() : null,
     instructions: assignment.instructions,

@@ -181,6 +181,7 @@ export function SubmitRecordingForm() {
   const [audioInputMode, setAudioInputMode] = useState<"upload" | "record">("upload");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [durationMs, setDurationMs] = useState(0);
+  const [previewCurrentMs, setPreviewCurrentMs] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedPreviewUrl, setRecordedPreviewUrl] = useState<string | null>(null);
 
@@ -355,6 +356,7 @@ export function SubmitRecordingForm() {
       recordedUrlRef.current = null;
     }
     setRecordedPreviewUrl(null);
+    setPreviewCurrentMs(0);
   }
 
   function stopRecordingSession() {
@@ -389,6 +391,7 @@ export function SubmitRecordingForm() {
   async function handleAudioSelected(file: File | null) {
     setAudioFile(file);
     setDurationMs(0);
+    setPreviewCurrentMs(0);
     if (!file) {
       return;
     }
@@ -604,9 +607,34 @@ export function SubmitRecordingForm() {
         throw new Error(boundaryError.error ?? "Failed to save boundaries");
       }
 
-      setSuccessMessage("Recording submitted successfully. It is now pending moderator approval.");
+      let alignmentMessage = "";
+      if (durationMs <= 120000 && audioFile.size <= 40 * 1024 * 1024) {
+        const alignmentForm = new FormData();
+        alignmentForm.set("file", audioFile);
+
+        const alignmentResponse = await fetch(`/api/recordings/${created.recording.id}/alignment`, {
+          method: "POST",
+          body: alignmentForm,
+        });
+
+        const alignmentPayload = await alignmentResponse.json().catch(() => ({}));
+        if (!alignmentResponse.ok) {
+          throw new Error((alignmentPayload as { error?: string }).error ?? "Auto-alignment failed");
+        }
+
+        if ((alignmentPayload as { status?: string }).status === "completed") {
+          alignmentMessage = " Auto-alignment completed.";
+        } else if ((alignmentPayload as { status?: string }).status === "processing") {
+          alignmentMessage = " Auto-alignment is processing in the background.";
+        } else if ((alignmentPayload as { status?: string }).status === "skipped") {
+          alignmentMessage = " Auto-alignment was skipped for this file.";
+        }
+      }
+
+      setSuccessMessage(`Recording submitted successfully. It is now pending moderator approval.${alignmentMessage}`);
       setAudioFile(null);
       setDurationMs(0);
+      setPreviewCurrentMs(0);
       clearRecordedPreview();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Submission failed.");
@@ -771,7 +799,23 @@ export function SubmitRecordingForm() {
             {recordedPreviewUrl ? (
               <div className="mt-3 rounded-xl border border-orange-900/15 bg-white p-3">
                 <p className="text-xs font-semibold uppercase tracking-wider text-orange-900/75">Recorded Preview</p>
-                <audio className="mt-2 w-full" controls preload="metadata" src={recordedPreviewUrl} />
+                <audio
+                  className="mt-2 w-full"
+                  controls
+                  onEnded={() => setPreviewCurrentMs(durationMs)}
+                  onLoadedMetadata={(event) => {
+                    setPreviewCurrentMs(Math.round(event.currentTarget.currentTime * 1000));
+                  }}
+                  onSeeked={(event) => {
+                    setPreviewCurrentMs(Math.round(event.currentTarget.currentTime * 1000));
+                  }}
+                  onTimeUpdate={(event) => {
+                    setPreviewCurrentMs(Math.round(event.currentTarget.currentTime * 1000));
+                  }}
+                  preload="metadata"
+                  src={recordedPreviewUrl}
+                />
+                <p className="mt-2 text-xs text-orange-900/80">Playback position: {previewCurrentMs} ms</p>
               </div>
             ) : null}
           </div>

@@ -176,7 +176,7 @@ export async function POST(request: Request) {
   const recording = await prisma.recording.findFirst({
     where: {
       id: parsed.data.recordingId,
-      status: RecordingStatus.APPROVED,
+      OR: [{ status: RecordingStatus.APPROVED }, { userId: session.user.id }],
     },
     select: {
       id: true,
@@ -184,7 +184,7 @@ export async function POST(request: Request) {
   });
 
   if (!recording) {
-    return Response.json({ error: "Recording not found or not approved" }, { status: 404 });
+    return Response.json({ error: "Recording not found or unavailable for assignment" }, { status: 404 });
   }
 
   const existingAssignment = await prisma.practiceAssignment.findFirst({

@@ -46,6 +46,23 @@ type RecordingBoundary = {
   };
 };
 
+type AutoAlignmentWord = {
+  text: string;
+  start: number;
+  end: number;
+  confidence: number;
+};
+
+type AutoAlignmentResult = {
+  text: string;
+  confidence: number | null;
+  audioDurationMs: number | null;
+  words: AutoAlignmentWord[];
+  model?: string;
+  source?: string;
+  languageCode?: string;
+};
+
 type RecordingItem = {
   id: string;
   nussach: string;
@@ -53,6 +70,8 @@ type RecordingItem = {
   publicUrl: string;
   durationMs: number;
   createdAt: string;
+  autoAlignmentStatus: string | null;
+  autoAlignmentResult: AutoAlignmentResult | null;
   primaryPasukId: string;
   user: {
     id: string;
@@ -121,7 +140,7 @@ function splitHebrewWords(text: string): string[] {
     .filter(Boolean);
 }
 
-function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: number): number {
+function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: number, alignmentWords: AutoAlignmentWord[] | null | undefined): number {
   if (!boundary) {
     return -1;
   }
@@ -129,6 +148,27 @@ function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: nu
   const words = splitHebrewWords(boundary.pasuk.hebrewText);
   if (words.length === 0) {
     return -1;
+  }
+
+  if (alignmentWords && alignmentWords.length > 0) {
+    const boundaryWords = alignmentWords.filter((item) => item.start >= boundary.startMs - 150 && item.end <= boundary.endMs + 300);
+    if (boundaryWords.length > 0) {
+      let activeIndex = -1;
+
+      for (let index = 0; index < boundaryWords.length; index += 1) {
+        const word = boundaryWords[index];
+        if (currentMs < word.start) {
+          break;
+        }
+
+        activeIndex = index;
+        if (currentMs <= word.end) {
+          break;
+        }
+      }
+
+      return clamp(activeIndex < 0 ? 0 : activeIndex, 0, words.length - 1);
+    }
   }
 
   const durationMs = boundary.endMs - boundary.startMs;
@@ -248,6 +288,7 @@ export function LearnerWorkbench() {
         ? selectedPasukBoundaryIndex
         : focusedBoundaryIndex;
   const focusedBoundary = activeBoundaries[effectiveBoundaryIndex] ?? null;
+  const alignmentWords = selectedRecording?.autoAlignmentResult?.words ?? null;
 
   useEffect(() => {
     if (!bookId) {
@@ -753,14 +794,20 @@ export function LearnerWorkbench() {
                     <p className="text-xs font-bold uppercase tracking-wider text-orange-900/75">Sing-along Mode</p>
                     <h3 className="mt-1 text-base font-bold text-orange-950">Follow the highlighted words with the recording</h3>
                   </div>
-                  <p className="text-xs text-orange-900/70">Teacher/student only for now</p>
+                  <p className="text-xs text-orange-900/70">
+                    {selectedRecording.autoAlignmentStatus === "completed"
+                      ? "AssemblyAI timings ready"
+                      : selectedRecording.autoAlignmentStatus === "processing"
+                        ? "AssemblyAI alignment running"
+                        : "Teacher/student only for now"}
+                  </p>
                 </div>
 
                 <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
                   <p className="text-right text-sm font-semibold text-orange-900/70">{focusedBoundary.pasuk.ref}</p>
                   <div className="mt-3 flex flex-wrap justify-end gap-2 text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
                     {splitHebrewWords(focusedBoundary.pasuk.hebrewText).map((word, index) => {
-                      const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs);
+                      const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
                       return (
                         <span
                           key={`${focusedBoundary.pasukId}-${index}-${word}`}

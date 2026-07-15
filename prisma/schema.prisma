@@ -215,6 +215,8 @@ model Recording {
   approvedByUserId    String?
   approvedBy          User?                @relation("RecordingApprovals", fields: [approvedByUserId], references: [id])
   autoAlignmentStatus String?
+  autoAlignmentResult Json?
+  autoAlignmentCompletedAt DateTime?
   boundaries          PasukBoundary[]
   votes               Vote[]
   moderationHistory   ModerationDecision[]

@@ -30,25 +30,42 @@ export async function GET(request: NextRequest) {
         },
         recording: {
           OR: [{ primaryPasukId: pasukId }, { boundaries: { some: { pasukId } } }],
-          status: statusFilter,
         },
       },
       select: {
         recordingId: true,
+        group: {
+          select: {
+            teacherId: true,
+          },
+        },
+        recording: {
+          select: {
+            status: true,
+            userId: true,
+          },
+        },
       },
-      distinct: ["recordingId"],
       take: 300,
     });
 
-    assignedRecordingIds = assignedRecordings.map((assignment) => assignment.recordingId);
+    assignedRecordingIds = Array.from(
+      new Set(
+        assignedRecordings
+          .filter((assignment) => assignment.recording.status === RecordingStatus.APPROVED || assignment.recording.userId === assignment.group.teacherId)
+          .map((assignment) => assignment.recordingId),
+      ),
+    );
+
     if (assignedRecordingIds.length > 0) {
       accessMode = "assigned-only";
     }
   }
 
+  const isAssignedModeForStudent = role === Role.USER && accessMode === "assigned-only";
   const where = pasukId
     ? {
-        status: statusFilter,
+        ...(isAssignedModeForStudent ? {} : { status: statusFilter }),
         ...(assignedRecordingIds.length > 0 ? { id: { in: assignedRecordingIds } } : {}),
         OR: [
           { primaryPasukId: pasukId },

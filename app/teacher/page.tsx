@@ -151,7 +151,9 @@ export default async function TeacherPage() {
       take: 120,
     }),
     prisma.recording.findMany({
-      where: { status: RecordingStatus.APPROVED },
+      where: {
+        OR: [{ status: RecordingStatus.APPROVED }, { userId: session.user.id }],
+      },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
