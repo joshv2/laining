@@ -380,17 +380,19 @@ export function LearnerWorkbench() {
       return;
     }
 
+    const recording = selectedRecording;
+
     let cancelled = false;
 
     async function ensureTextLoaded() {
       const pasuksToLoad = [
-        { id: selectedRecording.primaryPasukId, ref: selectedRecording.boundaries[0]?.pasuk?.ref || "Unknown" },
-        ...selectedRecording.boundaries.map((b) => ({ id: b.pasukId, ref: b.pasuk.ref })),
+        { id: recording.primaryPasukId, ref: recording.boundaries[0]?.pasuk?.ref || "Unknown" },
+        ...recording.boundaries.map((b) => ({ id: b.pasukId, ref: b.pasuk.ref })),
       ];
 
       const uniquePasukIds = Array.from(new Set(pasuksToLoad.map((p) => p.id)));
       const needsLoading = uniquePasukIds.filter((id) => {
-        const boundary = selectedRecording.boundaries.find((b) => b.pasukId === id);
+        const boundary = recording.boundaries.find((b) => b.pasukId === id);
         return !boundary?.pasuk.hebrewText;
       });
 
