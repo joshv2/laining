@@ -1,36 +1,34 @@
-import { Role } from "@prisma/client";
+import { z } from "zod";
 
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db/client";
+import { activateTeacherAccess } from "@/lib/services/teacher-access";
 
-export async function POST() {
+const activateTeacherSchema = z.object({
+  couponCode: z.string().trim().max(40).optional(),
+});
+
+export async function POST(request: Request) {
   const session = await auth();
 
   if (!session?.user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const currentRole = (session.user.role ?? Role.USER) as Role;
-
-  if (currentRole === Role.TEACHER) {
-    return Response.json({ ok: true, role: Role.TEACHER });
+  const parsed = activateTeacherSchema.safeParse(await request.json().catch(() => ({})));
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  if (currentRole !== Role.USER) {
-    return Response.json(
-      { error: "This account role cannot self-activate teacher mode." },
-      { status: 400 },
-    );
+  try {
+    const result = await activateTeacherAccess({
+      userId: session.user.id,
+      couponCode: parsed.data.couponCode,
+    });
+
+    return Response.json({ ok: true, role: result.role, message: result.message, accessSource: result.accessSource });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not activate teacher mode.";
+    const status = /paid/i.test(message) ? 402 : 400;
+    return Response.json({ error: message }, { status });
   }
-
-  const user = await prisma.user.update({
-    where: { id: session.user.id },
-    data: { role: Role.TEACHER },
-    select: {
-      id: true,
-      role: true,
-    },
-  });
-
-  return Response.json({ ok: true, user });
 }

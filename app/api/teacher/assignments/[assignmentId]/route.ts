@@ -1,9 +1,10 @@
-import { Role } from "@prisma/client";
+import { Role, TokenizationEventType } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
+import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
 const updateAssignmentSchema = z.object({
   instructions: z.string().max(2000).nullable().optional(),
@@ -81,6 +82,18 @@ export async function PATCH(request: Request, context: RouteContext) {
     },
   });
 
+  await triggerTokenizationSafely({
+    eventType: TokenizationEventType.ASSIGNMENT_UPDATED,
+    recipientUserId: session.user.id,
+    sourceType: "practice-assignment",
+    sourceId: updated.id,
+    metadata: {
+      groupId: updated.group.id,
+      recordingId: updated.recording.id,
+      dueAt: updated.dueAt ? updated.dueAt.toISOString() : null,
+    },
+  });
+
   return Response.json({ assignment: updated });
 }
 
@@ -113,6 +126,16 @@ export async function DELETE(_: Request, context: RouteContext) {
 
   await prisma.practiceAssignment.delete({
     where: { id: assignment.id },
+  });
+
+  await triggerTokenizationSafely({
+    eventType: TokenizationEventType.ASSIGNMENT_DELETED,
+    recipientUserId: session.user.id,
+    sourceType: "practice-assignment",
+    sourceId: assignment.id,
+    metadata: {
+      deletedByTeacherId: session.user.id,
+    },
   });
 
   return Response.json({ ok: true });

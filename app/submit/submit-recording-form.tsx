@@ -177,6 +177,7 @@ export function SubmitRecordingForm() {
 
   const [nussach, setNussach] = useState<(typeof NUSSACH_OPTIONS)[number]>("Ashkenazi");
   const [nussachCustom, setNussachCustom] = useState("");
+  const [recordingTitle, setRecordingTitle] = useState("");
 
   const [audioInputMode, setAudioInputMode] = useState<"upload" | "record">("upload");
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -245,7 +246,7 @@ export function SubmitRecordingForm() {
   const selectedWork = useMemo(() => works.find((item) => item.id === workId), [works, workId]);
   const selectedBook = useMemo(() => selectedWork?.books.find((item) => item.id === bookId), [selectedWork, bookId]);
   const primaryPasukId = useMemo(() => boundaries[0]?.pasukId ?? "", [boundaries]);
-  const selectablePesukim = useMemo(() => {
+  const rangePesukim = useMemo(() => {
     if (crossChapterEnabled || !chapterId) {
       return bookPesukim;
     }
@@ -253,6 +254,23 @@ export function SubmitRecordingForm() {
     return bookPesukim.filter((item) => item.chapterId === chapterId);
   }, [bookPesukim, chapterId, crossChapterEnabled]);
   const isSinglePasukRange = Boolean(startPasukId && endPasukId && startPasukId === endPasukId);
+
+  const selectedPesukim = useMemo(() => {
+    if (!startPasukId || !endPasukId) {
+      return [];
+    }
+
+    const startIdx = rangePesukim.findIndex((p) => p.id === startPasukId);
+    const endIdx = rangePesukim.findIndex((p) => p.id === endPasukId);
+
+    if (startIdx === -1 || endIdx === -1) {
+      return [];
+    }
+
+    const start = Math.min(startIdx, endIdx);
+    const end = Math.max(startIdx, endIdx);
+    return rangePesukim.slice(start, end + 1);
+  }, [startPasukId, endPasukId, rangePesukim]);
 
   useEffect(() => {
     if (!bookId) {
@@ -286,6 +304,50 @@ export function SubmitRecordingForm() {
       cancelled = true;
     };
   }, [bookId]);
+
+  useEffect(() => {
+    if (selectedPesukim.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function ensureTextLoaded() {
+      const needsLoading = selectedPesukim.filter((p) => !p.hebrewText);
+      if (needsLoading.length === 0) {
+        return;
+      }
+
+      for (const pasuk of needsLoading) {
+        if (cancelled) break;
+        try {
+          await fetch("/api/text/ensure-loaded", {
+            method: "POST",
+            body: JSON.stringify({ pasukId: pasuk.id }),
+          });
+        } catch (error) {
+          console.error(`Failed to load text for ${pasuk.ref}:`, error);
+        }
+      }
+
+      // Refresh the pesukim to reflect updated text
+      if (!cancelled && bookId) {
+        try {
+          const response = await fetch(`/api/text/pesukim?bookId=${encodeURIComponent(bookId)}`);
+          const data = await response.json();
+          setBookPesukim(data.pesukim ?? []);
+        } catch (error) {
+          console.error("Failed to refresh pesukim:", error);
+        }
+      }
+    }
+
+    ensureTextLoaded();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPesukim, bookId]);
 
   function handleWorkChange(nextWorkId: string) {
     setWorkId(nextWorkId);
@@ -328,7 +390,7 @@ export function SubmitRecordingForm() {
 
   function handleStartPasukChange(nextStartPasukId: string) {
     const nextRows = buildBoundaryRows({
-      pesukim: bookPesukim,
+      pesukim: rangePesukim,
       startPasukId: nextStartPasukId,
       endPasukId,
       previous: boundaries,
@@ -340,7 +402,7 @@ export function SubmitRecordingForm() {
 
   function handleEndPasukChange(nextEndPasukId: string) {
     const nextRows = buildBoundaryRows({
-      pesukim: bookPesukim,
+      pesukim: rangePesukim,
       startPasukId,
       endPasukId: nextEndPasukId,
       previous: boundaries,
@@ -506,6 +568,32 @@ export function SubmitRecordingForm() {
     });
   }
 
+  function handleBoundaryEndBlur(index: number) {
+    setBoundaries((prev) => {
+      if (index < 0 || index >= prev.length - 1) {
+        return prev;
+      }
+
+      const endValue = Number(prev[index]?.endMs);
+      if (!Number.isFinite(endValue)) {
+        return prev;
+      }
+
+      const nextStart = prev[index + 1]?.startMs?.trim() ?? "";
+      if (nextStart.length > 0) {
+        return prev;
+      }
+
+      const nextRows = [...prev];
+      nextRows[index + 1] = {
+        ...nextRows[index + 1],
+        startMs: String(Math.max(0, Math.floor(endValue) + 1)),
+      };
+
+      return nextRows;
+    });
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -579,6 +667,7 @@ export function SubmitRecordingForm() {
           rangeStartPasukId: startPasukId,
           rangeEndPasukId: endPasukId,
           source: audioInputMode === "record" ? "BROWSER_RECORDING" : "UPLOAD",
+          title: recordingTitle.trim() || undefined,
           nussach: nussachPayload,
           nussachCustom: nussach === "Other" ? nussachCustom : undefined,
           storageKey: upload.objectKey,
@@ -633,6 +722,7 @@ export function SubmitRecordingForm() {
 
       setSuccessMessage(`Recording submitted successfully. It is now pending moderator approval.${alignmentMessage}`);
       setAudioFile(null);
+      setRecordingTitle("");
       setDurationMs(0);
       setPreviewCurrentMs(0);
       clearRecordedPreview();
@@ -646,7 +736,7 @@ export function SubmitRecordingForm() {
   function handleCrossChapterChange(enabled: boolean) {
     setCrossChapterEnabled(enabled);
 
-    const sourcePesukim = enabled || !chapterId ? bookPesukim : selectablePesukim;
+    const sourcePesukim = enabled || !chapterId ? bookPesukim : bookPesukim.filter((item) => item.chapterId === chapterId);
     const nextRows = buildBoundaryRows({
       pesukim: sourcePesukim,
       startPasukId,
@@ -706,9 +796,9 @@ export function SubmitRecordingForm() {
       <section className="grid gap-4 md:grid-cols-2">
         <label className="text-sm font-semibold text-orange-950">
           Start Pasuk
-          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || selectablePesukim.length === 0} onChange={(event) => handleStartPasukChange(event.target.value)} value={startPasukId}>
+          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleStartPasukChange(event.target.value)} value={startPasukId}>
             <option value="">Select start</option>
-            {selectablePesukim.map((pasuk) => (
+            {rangePesukim.map((pasuk) => (
               <option key={pasuk.id} value={pasuk.id}>{pasuk.ref} (Ch. {pasuk.chapterNumber})</option>
             ))}
           </select>
@@ -716,16 +806,43 @@ export function SubmitRecordingForm() {
 
         <label className="text-sm font-semibold text-orange-950">
           End Pasuk
-          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || selectablePesukim.length === 0} onChange={(event) => handleEndPasukChange(event.target.value)} value={endPasukId}>
+          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleEndPasukChange(event.target.value)} value={endPasukId}>
             <option value="">Select end</option>
-            {selectablePesukim.map((pasuk) => (
+            {rangePesukim.map((pasuk) => (
               <option key={pasuk.id} value={pasuk.id}>{pasuk.ref} (Ch. {pasuk.chapterNumber})</option>
             ))}
           </select>
         </label>
       </section>
 
+      {selectedPesukim.length > 0 && (
+        <section className="rounded-2xl border border-orange-900/15 bg-white p-4">
+          <h3 className="text-sm font-semibold text-orange-950 mb-3">Selected Pesukim Text</h3>
+          <div className="space-y-3">
+            {selectedPesukim.map((pasuk) => (
+              <div key={pasuk.id} className="rounded-lg border border-orange-900/10 bg-orange-50/50 p-3">
+                <p className="text-xs font-semibold text-orange-900/60 mb-1">{pasuk.ref}</p>
+                <p className="text-lg leading-relaxed text-right text-orange-950 font-hebrew">
+                  {pasuk.hebrewText || "[Text not yet loaded]"}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-4 md:grid-cols-3">
+        <label className="text-sm font-semibold text-orange-950 md:col-span-3">
+          Recording Title (optional)
+          <input
+            className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2"
+            maxLength={120}
+            onChange={(event) => setRecordingTitle(event.target.value)}
+            placeholder="Example: Ezra practice version for Yonah"
+            value={recordingTitle}
+          />
+        </label>
+
         <label className="text-sm font-semibold text-orange-950">
           Nussach
           <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" onChange={(event) => setNussach(event.target.value as (typeof NUSSACH_OPTIONS)[number])} value={nussach}>
@@ -860,7 +977,13 @@ export function SubmitRecordingForm() {
                       <input className="w-full rounded-lg border border-orange-900/20 px-3 py-2" onChange={(event) => updateBoundary(index, "startMs", event.target.value)} placeholder="0" value={row.startMs} />
                     </td>
                     <td className="px-4 py-3">
-                      <input className="w-full rounded-lg border border-orange-900/20 px-3 py-2" onChange={(event) => updateBoundary(index, "endMs", event.target.value)} placeholder="1200" value={row.endMs} />
+                      <input
+                        className="w-full rounded-lg border border-orange-900/20 px-3 py-2"
+                        onBlur={() => handleBoundaryEndBlur(index)}
+                        onChange={(event) => updateBoundary(index, "endMs", event.target.value)}
+                        placeholder="1200"
+                        value={row.endMs}
+                      />
                     </td>
                   </tr>
                 ))}

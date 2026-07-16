@@ -15,6 +15,7 @@ type GroupSummary = {
 
 type RecordingOption = {
   id: string;
+  title: string | null;
   nussach: string;
   nussachCustom: string | null;
   durationMs: number;
@@ -42,6 +43,7 @@ type AssignmentSummary = {
   groupName: string;
   playbackEventCount: number;
   recording: {
+    title: string | null;
     nussach: string;
     nussachCustom: string | null;
     primaryPasukRef: string;
@@ -93,6 +95,15 @@ type AnalyticsSummary = {
   weeklyActiveStudents: number;
 };
 
+type TeacherAccessSummary = {
+  status: "ACTIVE" | "CANCELED";
+  source: "FREE" | "COUPON" | "STRIPE";
+  priceCents: number;
+  currencyCode: string;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+};
+
 type Props = {
   groups: GroupSummary[];
   approvedRecordings: RecordingOption[];
@@ -102,6 +113,7 @@ type Props = {
   directStudents: DirectStudentItem[];
   roster: RosterItem[];
   analytics: AnalyticsSummary;
+  teacherAccess: TeacherAccessSummary;
 };
 
 function formatDate(value: string | null): string {
@@ -132,7 +144,7 @@ function inviteState(invite: InviteSummary): "accepted" | "expired" | "pending" 
   return "pending";
 }
 
-export function TeacherDashboardClient({ groups, approvedRecordings, invites, assignments, assignmentActivity, directStudents, roster, analytics }: Props) {
+export function TeacherDashboardClient({ groups, approvedRecordings, invites, assignments, assignmentActivity, directStudents, roster, analytics, teacherAccess }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -320,8 +332,52 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
     setStatusMessage("Invite link copied.");
   }
 
+  async function handleDeactivateTeacher() {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm("Deactivate teacher mode? You will lose teacher dashboard access until re-activated.");
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    const response = await fetch("/api/teacher/deactivate", {
+      method: "POST",
+    });
+
+    const data = await parseJson(response);
+    setStatusMessage(data?.result?.message ?? "Teacher mode deactivated.");
+    router.refresh();
+    router.push("/teacher");
+  }
+
   return (
     <div className="grid gap-6">
+      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-orange-950">Teacher Access & Billing</h2>
+            <p className="mt-1 text-sm text-orange-900/80">
+              Status: {teacherAccess.status} - Source: {teacherAccess.source} -
+              {" "}{teacherAccess.currencyCode} {(teacherAccess.priceCents / 100).toFixed(2)}
+            </p>
+            <p className="mt-1 text-xs text-orange-900/75">
+              Activated: {formatDate(teacherAccess.activatedAt)}
+              {teacherAccess.deactivatedAt ? ` - Deactivated: ${formatDate(teacherAccess.deactivatedAt)}` : ""}
+            </p>
+          </div>
+          <button
+            className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            disabled={isPending}
+            onClick={() => {
+              void withStatus(() => handleDeactivateTeacher());
+            }}
+            type="button"
+          >
+            Deactivate Teacher Mode
+          </button>
+        </div>
+      </section>
+
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <article className="rounded-xl border border-orange-900/15 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-orange-900/70">Students</p>
@@ -406,6 +462,7 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
               <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue={defaultRecordingId} name="recordingId" required>
                 {approvedRecordings.map((recording) => (
                   <option key={recording.id} value={recording.id}>
+                    {recording.title ? `${recording.title} - ` : ""}
                     {recording.primaryPasukRef} - {recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
                   </option>
                 ))}
@@ -494,7 +551,20 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
                           Revoke
                         </button>
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-full border border-zinc-300 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                          disabled={isPending}
+                          onClick={() => {
+                            void withStatus(() => handleRevokeInvite(invite.id));
+                          }}
+                          type="button"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -511,6 +581,7 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
               {assignments.map((assignment) => (
                 <li key={assignment.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
                   <p className="text-sm font-semibold text-orange-950">
+                    {assignment.recording.title ? `${assignment.recording.title} - ` : ""}
                     {assignment.recording.primaryPasukRef} - {assignment.recording.nussach}
                     {assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}
                   </p>
@@ -657,6 +728,7 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
                     <select className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={defaultRecordingId} name="recordingId" required>
                       {approvedRecordings.map((recording) => (
                         <option key={recording.id} value={recording.id}>
+                          {recording.title ? `${recording.title} - ` : ""}
                           {recording.primaryPasukRef} - {recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
                         </option>
                       ))}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ChapterSummary = {
@@ -65,6 +66,7 @@ type AutoAlignmentResult = {
 
 type RecordingItem = {
   id: string;
+  title: string | null;
   nussach: string;
   nussachCustom: string | null;
   publicUrl: string;
@@ -100,6 +102,7 @@ type StudentAssignment = {
   };
   recording: {
     id: string;
+    title: string | null;
     nussach: string;
     nussachCustom: string | null;
     primaryPasuk: {
@@ -117,6 +120,19 @@ type StudentAssignment = {
 
 function ms(value: number): string {
   return `${Math.max(0, Math.round(value))} ms`;
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+
+  return date.toLocaleString("en-US", {
+    timeZone: "UTC",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -151,23 +167,16 @@ function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: nu
   }
 
   if (alignmentWords && alignmentWords.length > 0) {
-    const boundaryWords = alignmentWords.filter((item) => item.start >= boundary.startMs - 150 && item.end <= boundary.endMs + 300);
+    const boundaryWords = alignmentWords.filter((item) => item.start >= boundary.startMs && item.end <= boundary.endMs + 30);
     if (boundaryWords.length > 0) {
-      let activeIndex = -1;
-
       for (let index = 0; index < boundaryWords.length; index += 1) {
         const word = boundaryWords[index];
-        if (currentMs < word.start) {
-          break;
-        }
-
-        activeIndex = index;
         if (currentMs <= word.end) {
-          break;
+          return clamp(index, 0, words.length - 1);
         }
       }
 
-      return clamp(activeIndex < 0 ? 0 : activeIndex, 0, words.length - 1);
+      return clamp(boundaryWords.length - 1, 0, words.length - 1);
     }
   }
 
@@ -178,6 +187,14 @@ function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: nu
 
   const progress = clamp((currentMs - boundary.startMs) / durationMs, 0, 0.9999);
   return Math.min(words.length - 1, Math.floor(progress * words.length));
+}
+
+function getBoundaryAlignmentWords(boundary: RecordingBoundary | null, alignmentWords: AutoAlignmentWord[] | null | undefined): AutoAlignmentWord[] {
+  if (!boundary || !alignmentWords || alignmentWords.length === 0) {
+    return [];
+  }
+
+  return alignmentWords.filter((item) => item.start >= boundary.startMs && item.end <= boundary.endMs + 30);
 }
 
 export function LearnerWorkbench() {
@@ -357,6 +374,63 @@ export function LearnerWorkbench() {
       cancelled = true;
     };
   }, [pasukId]);
+
+  useEffect(() => {
+    if (!selectedRecording) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function ensureTextLoaded() {
+      const pasuksToLoad = [
+        { id: selectedRecording.primaryPasukId, ref: selectedRecording.boundaries[0]?.pasuk?.ref || "Unknown" },
+        ...selectedRecording.boundaries.map((b) => ({ id: b.pasukId, ref: b.pasuk.ref })),
+      ];
+
+      const uniquePasukIds = Array.from(new Set(pasuksToLoad.map((p) => p.id)));
+      const needsLoading = uniquePasukIds.filter((id) => {
+        const boundary = selectedRecording.boundaries.find((b) => b.pasukId === id);
+        return !boundary?.pasuk.hebrewText;
+      });
+
+      if (needsLoading.length === 0) {
+        return;
+      }
+
+      for (const pasukId of needsLoading) {
+        if (cancelled) break;
+        try {
+          await fetch("/api/text/ensure-loaded", {
+            method: "POST",
+            body: JSON.stringify({ pasukId }),
+          });
+        } catch (error) {
+          console.error(`Failed to load text for pasuk ${pasukId}:`, error);
+        }
+      }
+
+      // Reload the selected recording to get updated text
+      if (!cancelled && selectedRecordingId) {
+        try {
+          const response = await fetch(`/api/recordings?pasukId=${encodeURIComponent(pasukId)}`);
+          const data = await response.json();
+          const updated = data.recordings?.find((r: RecordingItem) => r.id === selectedRecordingId);
+          if (updated) {
+            setRecordings((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+          }
+        } catch (error) {
+          console.error("Failed to refresh recording:", error);
+        }
+      }
+    }
+
+    ensureTextLoaded();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRecording, selectedRecordingId, pasukId]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -573,6 +647,31 @@ export function LearnerWorkbench() {
     setCurrentMs(clamped);
   }
 
+  function seekToWord(boundary: RecordingBoundary | null, wordIndex: number) {
+    if (!boundary) {
+      return;
+    }
+
+    const boundaryWords = getBoundaryAlignmentWords(boundary, alignmentWords);
+    if (boundaryWords.length > 0) {
+      const targetWord = boundaryWords[Math.min(wordIndex, boundaryWords.length - 1)];
+      // Nudge 1ms into the token so boundary-equal timestamps do not light the previous word.
+      seekWithinPasuk(targetWord.start + 1);
+      return;
+    }
+
+    const words = splitHebrewWords(boundary.pasuk.hebrewText);
+    if (words.length === 0) {
+      seekWithinPasuk(boundary.startMs);
+      return;
+    }
+
+    const duration = Math.max(1, boundary.endMs - boundary.startMs);
+    const fraction = clamp(wordIndex / words.length, 0, 1);
+    const estimatedTime = Math.round(boundary.startMs + duration * fraction);
+    seekWithinPasuk(estimatedTime);
+  }
+
   function openAssignment(assignment: StudentAssignment) {
     setWorkId(assignment.recording.primaryPasuk.workId);
     setBookId(assignment.recording.primaryPasuk.bookId);
@@ -615,6 +714,7 @@ export function LearnerWorkbench() {
               {assignments.slice(0, 8).map((assignment) => (
                 <li key={assignment.id} className="rounded-lg border border-orange-900/10 bg-white p-2">
                   <p className="text-sm font-semibold text-orange-950">
+                    {assignment.recording.title ? `${assignment.recording.title} - ` : ""}
                     {assignment.recording.primaryPasuk.ref} - {assignment.recording.nussach}
                     {assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}
                   </p>
@@ -690,7 +790,13 @@ export function LearnerWorkbench() {
           {loadingRecordings ? (
             <p className="mt-2 text-sm text-orange-900/70">Loading recordings...</p>
           ) : recordings.length === 0 ? (
-            <p className="mt-2 text-sm text-orange-900/70">No approved recordings found for this pasuk yet.</p>
+            <p className="mt-2 text-sm text-orange-900/70">
+              No approved recordings found for this pasuk yet.{" "}
+              <Link className="font-semibold text-orange-900 underline decoration-orange-700 underline-offset-2 hover:text-orange-700" href="/submit">
+                Submit a recording
+              </Link>
+              .
+            </p>
           ) : (
             <ul className="mt-3 space-y-2">
               {recordings.map((recording) => (
@@ -711,7 +817,11 @@ export function LearnerWorkbench() {
                     type="button"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-orange-950">{recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}</span>
+                      <span className="font-semibold text-orange-950">
+                        {recording.title ? `${recording.title} - ` : ""}
+                        {recording.nussach}
+                        {recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
+                      </span>
                       <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${
                         recording.matchType === "primary"
                           ? "bg-lime-100 text-lime-900"
@@ -723,7 +833,11 @@ export function LearnerWorkbench() {
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-orange-900/70">
-                      By {recording.user.name ?? "Anonymous"} • {recording.boundaries.length} markers
+                      By {recording.user.name ?? "Anonymous"} • {recording.boundaries.length} markers • {ms(recording.durationMs)}
+                    </p>
+                    <p className="mt-1 text-xs text-orange-900/70">
+                      Added {formatDateTime(recording.createdAt)} •
+                      Range {recording.boundaries[0]?.pasuk.ref ?? "Unknown"} to {recording.boundaries[recording.boundaries.length - 1]?.pasuk.ref ?? "Unknown"}
                     </p>
                   </button>
                 </li>
@@ -739,7 +853,12 @@ export function LearnerWorkbench() {
           <p className="mt-3 text-sm text-orange-900/70">Pick a pasuk and recording to begin listening.</p>
         ) : (
           <>
-            <p className="mt-2 text-sm text-orange-900/80">
+            {selectedRecording.title ? (
+              <p className="mt-2 text-sm text-orange-900/80">
+                Title: <span className="font-semibold">{selectedRecording.title}</span>
+              </p>
+            ) : null}
+            <p className="text-sm text-orange-900/80">
               Nussach: <span className="font-semibold">{selectedRecording.nussach}</span>
               {selectedRecording.nussachCustom ? ` (${selectedRecording.nussachCustom})` : ""}
             </p>
@@ -751,10 +870,20 @@ export function LearnerWorkbench() {
             <audio className="mt-3 w-full" controls preload="metadata" ref={audioRef} src={selectedRecording.publicUrl} />
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <button className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100" onClick={() => jumpToBoundary(Math.max(0, effectiveBoundaryIndex - 1), true)} type="button">
+              <button
+                className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={activeBoundaries.length === 0 || effectiveBoundaryIndex <= 0}
+                onClick={() => jumpToBoundary(Math.max(0, effectiveBoundaryIndex - 1), true)}
+                type="button"
+              >
                 Prev Pasuk
               </button>
-              <button className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100" onClick={() => jumpToBoundary(Math.min(activeBoundaries.length - 1, effectiveBoundaryIndex + 1), true)} type="button">
+              <button
+                className="rounded-full border border-orange-900/25 px-3 py-2 text-sm font-semibold hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={activeBoundaries.length === 0 || effectiveBoundaryIndex >= activeBoundaries.length - 1}
+                onClick={() => jumpToBoundary(Math.min(activeBoundaries.length - 1, effectiveBoundaryIndex + 1), true)}
+                type="button"
+              >
                 Next Pasuk
               </button>
               <button className="rounded-full bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-700" onClick={playCurrentPasuk} type="button">
@@ -805,23 +934,28 @@ export function LearnerWorkbench() {
 
                 <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
                   <p className="text-right text-sm font-semibold text-orange-900/70">{focusedBoundary.pasuk.ref}</p>
-                  <div className="mt-3 flex flex-wrap justify-end gap-2 text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
+                  <div className="text-hebrew mt-3 w-full text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
                     {splitHebrewWords(focusedBoundary.pasuk.hebrewText).map((word, index) => {
                       const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
                       return (
-                        <span
-                          key={`${focusedBoundary.pasukId}-${index}-${word}`}
-                          className={`rounded-lg px-2 py-1 transition-colors ${
-                            isActive
-                              ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
-                              : "text-orange-950/70"
-                          }`}
-                        >
-                          {word}
+                        <span key={`${focusedBoundary.pasukId}-${index}-${word}`} className="inline-block align-baseline">
+                          <button
+                            className={`mb-2 cursor-pointer rounded-lg px-2 py-1 text-right transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
+                              isActive
+                                ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
+                                : "text-orange-950/70 hover:bg-orange-200/60"
+                            }`}
+                            onClick={() => seekToWord(focusedBoundary, index)}
+                            title="Click to seek to this word"
+                            type="button"
+                          >
+                            {word}
+                          </button>{" "}
                         </span>
                       );
                     })}
                   </div>
+                  <p className="mt-3 text-left text-xs font-semibold text-orange-900/70" dir="ltr">Tip: click any word to jump playback inside this pasuk.</p>
                 </div>
 
                 {focusedBoundary.pasuk.englishText ? (

@@ -38,10 +38,6 @@ export async function DELETE(_: Request, context: RouteContext) {
     return Response.json({ error: "Invite not found" }, { status: 404 });
   }
 
-  if (invite.acceptedAt) {
-    return Response.json({ error: "Accepted invites cannot be revoked." }, { status: 409 });
-  }
-
   await prisma.teacherInvite.delete({
     where: { id: invite.id },
   });

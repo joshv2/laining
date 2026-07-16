@@ -6,6 +6,7 @@ export const createRecordingSchema = z.object({
   rangeStartPasukId: z.string().min(1),
   rangeEndPasukId: z.string().min(1),
   source: z.nativeEnum(RecordingSource),
+  title: z.string().max(120).optional(),
   nussach: z.string().min(1),
   nussachCustom: z.string().max(100).optional(),
   storageKey: z.string().min(1),

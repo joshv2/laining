@@ -44,6 +44,7 @@ export async function GET() {
       recording: {
         select: {
           id: true,
+          title: true,
           nussach: true,
           nussachCustom: true,
           status: true,
@@ -96,6 +97,7 @@ export async function GET() {
     assignedByTeacher: assignment.assignedByTeacher,
     recording: {
       id: assignment.recording.id,
+      title: assignment.recording.title,
       nussach: assignment.recording.nussach,
       nussachCustom: assignment.recording.nussachCustom,
       primaryPasuk: {

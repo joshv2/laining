@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { RecordingStatus, Role } from "@prisma/client";
@@ -75,9 +74,6 @@ export default async function ModerationPage() {
           <p className="mt-2 text-sm text-orange-900/80">
             Your account is signed in as {role}. You need Moderator or Superuser role to review recordings.
           </p>
-          <Link className="mt-5 inline-block rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white" href="/">
-            Back Home
-          </Link>
         </div>
       </main>
     );
@@ -106,14 +102,11 @@ export default async function ModerationPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10 md:px-12">
-      <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <header className="mb-8">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[var(--ink-soft)]">Moderation</p>
           <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Pending Recording Reviews</h1>
         </div>
-        <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/">
-          Back Home
-        </Link>
       </header>
 
       {queue.length === 0 ? (
@@ -132,6 +125,9 @@ export default async function ModerationPage() {
                   </p>
                   <p className="text-sm text-orange-900/80">
                     Submitted by {recording.user.name ?? recording.user.email ?? "Unknown user"}
+                  </p>
+                  <p className="text-sm text-orange-900/80">
+                    {recording.title ? `Title: ${recording.title}` : "Untitled recording"}
                   </p>
                   <p className="text-sm text-orange-900/80">
                     Nussach: {recording.nussach}

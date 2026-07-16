@@ -1,8 +1,9 @@
-import { RecordingStatus, Role } from "@prisma/client";
+import { RecordingStatus, Role, TokenizationEventType } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
 const decisionSchema = z.object({
   recordingId: z.string().min(1),
@@ -67,6 +68,21 @@ export async function POST(request: Request) {
     });
 
     return recording;
+  });
+
+  await triggerTokenizationSafely({
+    eventType:
+      nextStatus === RecordingStatus.APPROVED
+        ? TokenizationEventType.MODERATION_APPROVED
+        : TokenizationEventType.MODERATION_REJECTED,
+    recipientUserId: updated.userId,
+    sourceType: "recording",
+    sourceId: updated.id,
+    metadata: {
+      moderatorId: session.user.id,
+      nextStatus,
+      reason: reason ?? null,
+    },
   });
 
   return Response.json({ recording: updated });

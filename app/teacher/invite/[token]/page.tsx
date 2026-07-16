@@ -104,9 +104,6 @@ export default async function TeacherInvitePage({ params }: PageProps) {
           <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/learn">
             Open Learn
           </Link>
-          <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/">
-            Back Home
-          </Link>
         </div>
       </section>
     </main>

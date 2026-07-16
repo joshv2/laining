@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { prisma } from "@/lib/db/client";
 
 const sefariaTextSchema = z.object({
   ref: z.string(),
@@ -14,11 +15,12 @@ export type SefariaText = {
 
 function normalizeText(input: string | string[] | undefined): string {
   if (!input) return "";
-  return Array.isArray(input) ? input.join(" ").trim() : input.trim();
+  const merged = Array.isArray(input) ? input.join(" ").trim() : input.trim();
+  return merged.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 }
 
 export async function fetchSefariaPasuk(ref: string): Promise<SefariaText> {
-  const url = `https://www.sefaria.org/api/texts/${encodeURIComponent(ref)}?context=0&commentary=0`;
+  const url = `https://www.sefaria.org/api/texts/${encodeURIComponent(ref)}?context=0&commentary=0&vhe=${encodeURIComponent("Tanach with Ta'amei Hamikra")}`;
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -36,4 +38,34 @@ export async function fetchSefariaPasuk(ref: string): Promise<SefariaText> {
     hebrewText: normalizeText(parsed.he),
     englishText: normalizeText(parsed.text),
   };
+}
+
+export async function ensurePasukTextLoaded(pasuk: { id: string; ref: string; hebrewText: string | null }): Promise<{ id: string; ref: string; hebrewText: string | null }> {
+  // If text is already loaded, return as-is
+  if (pasuk.hebrewText && pasuk.hebrewText.trim()) {
+    return pasuk;
+  }
+
+  // Fetch from Sefaria
+  try {
+    const sefariaText = await fetchSefariaPasuk(pasuk.ref);
+
+    // Update database
+    await prisma.pasuk.update({
+      where: { id: pasuk.id },
+      data: {
+        hebrewText: sefariaText.hebrewText || null,
+        englishText: sefariaText.englishText || null,
+      },
+    });
+
+    return {
+      ...pasuk,
+      hebrewText: sefariaText.hebrewText,
+    };
+  } catch (error) {
+    // Log error but return original pasuk with null text
+    console.error(`Failed to fetch text for ${pasuk.ref}:`, error);
+    return pasuk;
+  }
 }

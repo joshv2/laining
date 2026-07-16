@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { RecordingStatus, Role } from "@prisma/client";
@@ -56,12 +55,10 @@ export default async function TeacherPage() {
           <p className="mt-3 max-w-2xl text-sm text-orange-900/80">
             Teacher mode lets you invite students by email, assign specific recordings, and track login and practice activity.
           </p>
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            {role === Role.USER ? <ActivateTeacherButton /> : null}
-            <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/">
-              Back Home
-            </Link>
-          </div>
+          <p className="mt-2 max-w-2xl text-xs font-semibold text-orange-900/70">
+            Recording playback remains open; only teacher feature access can be coupon or payment gated.
+          </p>
+          <div className="mt-5">{role === Role.USER ? <ActivateTeacherButton /> : null}</div>
           {role !== Role.USER ? (
             <p className="mt-3 text-xs font-semibold text-orange-900/70">
               Current role: {role}. Self-activation is available for standard user accounts only.
@@ -84,6 +81,7 @@ export default async function TeacherPage() {
     enrollmentsRaw,
     directLinksRaw,
     teacherPlaybackEventsRaw,
+    teacherAccessSubscriptionRaw,
     pendingInvites,
     totalAssignments,
   ] = await Promise.all([
@@ -133,6 +131,7 @@ export default async function TeacherPage() {
         recording: {
           select: {
             id: true,
+            title: true,
             nussach: true,
             nussachCustom: true,
             primaryPasuk: {
@@ -157,6 +156,7 @@ export default async function TeacherPage() {
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
+        title: true,
         nussach: true,
         nussachCustom: true,
         durationMs: true,
@@ -229,6 +229,19 @@ export default async function TeacherPage() {
       },
       take: 1000,
     }),
+    prisma.teacherAccessSubscription?.findUnique({
+      where: {
+        userId: session.user.id,
+      },
+      select: {
+        status: true,
+        source: true,
+        priceCents: true,
+        currencyCode: true,
+        activatedAt: true,
+        deactivatedAt: true,
+      },
+    }) ?? Promise.resolve(null),
     prisma.teacherInvite.count({
       where: {
         teacherId: session.user.id,
@@ -325,6 +338,7 @@ export default async function TeacherPage() {
     groupName: assignment.group.name,
     playbackEventCount: assignment._count.playbackEvents,
     recording: {
+      title: assignment.recording.title,
       nussach: assignment.recording.nussach,
       nussachCustom: assignment.recording.nussachCustom,
       primaryPasukRef: assignment.recording.primaryPasuk.ref,
@@ -441,12 +455,21 @@ export default async function TeacherPage() {
 
   const approvedRecordings = approvedRecordingsRaw.map((recording) => ({
     id: recording.id,
+    title: recording.title,
     nussach: recording.nussach,
     nussachCustom: recording.nussachCustom,
     durationMs: recording.durationMs,
     primaryPasukRef: recording.primaryPasuk.ref,
   }));
 
+        const teacherAccess = {
+          status: teacherAccessSubscriptionRaw?.status ?? "ACTIVE",
+          source: teacherAccessSubscriptionRaw?.source ?? "FREE",
+          priceCents: teacherAccessSubscriptionRaw?.priceCents ?? 0,
+          currencyCode: teacherAccessSubscriptionRaw?.currencyCode ?? "USD",
+          activatedAt: teacherAccessSubscriptionRaw?.activatedAt.toISOString() ?? null,
+          deactivatedAt: teacherAccessSubscriptionRaw?.deactivatedAt?.toISOString() ?? null,
+        };
   const analytics = {
     totalStudents: uniqueStudentIds.size,
     pendingInvites,
@@ -457,7 +480,7 @@ export default async function TeacherPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10 md:px-12">
-      <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <header className="mb-8">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--ink-soft)]">Teacher Mode</p>
           <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Teacher Dashboard</h1>
@@ -465,9 +488,6 @@ export default async function TeacherPage() {
             Direct 1-on-1 tutoring is the primary flow. Classes are optional when you want to group multiple students.
           </p>
         </div>
-        <Link className="rounded-full border border-orange-900/25 px-4 py-2 text-sm font-semibold hover:bg-orange-100" href="/">
-          Back Home
-        </Link>
       </header>
 
       <details className="mb-6 rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
@@ -496,6 +516,7 @@ export default async function TeacherPage() {
 
       <TeacherDashboardClient
         analytics={analytics}
+              teacherAccess={teacherAccess}
         approvedRecordings={approvedRecordings}
         assignmentActivity={assignmentActivity}
         assignments={assignments}

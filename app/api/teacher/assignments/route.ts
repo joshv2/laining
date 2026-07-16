@@ -1,9 +1,10 @@
-import { RecordingStatus, Role } from "@prisma/client";
+import { RecordingStatus, Role, TokenizationEventType } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
+import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
 const createAssignmentSchema = z.object({
   groupId: z.string().min(1).optional(),
@@ -44,6 +45,7 @@ export async function GET(request: Request) {
       recording: {
         select: {
           id: true,
+          title: true,
           nussach: true,
           nussachCustom: true,
           publicUrl: true,
@@ -219,6 +221,7 @@ export async function POST(request: Request) {
       recording: {
         select: {
           id: true,
+          title: true,
           nussach: true,
           nussachCustom: true,
           publicUrl: true,
@@ -231,6 +234,17 @@ export async function POST(request: Request) {
           },
         },
       },
+    },
+  });
+
+  await triggerTokenizationSafely({
+    eventType: TokenizationEventType.ASSIGNMENT_CREATED,
+    recipientUserId: session.user.id,
+    sourceType: "practice-assignment",
+    sourceId: assignment.id,
+    metadata: {
+      groupId: assignment.group.id,
+      recordingId: assignment.recording.id,
     },
   });
 

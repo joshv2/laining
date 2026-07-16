@@ -151,9 +151,11 @@ export async function POST(request: NextRequest) {
   }
 
   const normalized = normalizeNussach(parsed.data);
+  const normalizedTitle = parsed.data.title?.trim() || undefined;
   const recording = await prisma.recording.create({
     data: {
       ...parsed.data,
+      title: normalizedTitle,
       nussach: normalized.nussach,
       nussachCustom: normalized.nussachCustom,
       userId: session.user.id,

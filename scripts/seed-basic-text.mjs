@@ -21,20 +21,34 @@ const seedData = {
                 {
                   number: 1,
                   ref: "Genesis 1:1",
-                  hebrewText: "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ",
-                  englishText: "In the beginning God created the heavens and the earth.",
                 },
                 {
                   number: 2,
                   ref: "Genesis 1:2",
-                  hebrewText: "וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ וְחֹשֶׁךְ עַל פְּנֵי תְהוֹם",
-                  englishText: "The earth was unformed and void, with darkness over the surface of the deep.",
                 },
                 {
                   number: 3,
                   ref: "Genesis 1:3",
-                  hebrewText: "וַיֹּאמֶר אֱלֹהִים יְהִי אוֹר וַיְהִי אוֹר",
-                  englishText: "God said, Let there be light, and there was light.",
+                },
+                {
+                  number: 4,
+                  ref: "Genesis 1:4",
+                },
+                {
+                  number: 5,
+                  ref: "Genesis 1:5",
+                },
+                {
+                  number: 6,
+                  ref: "Genesis 1:6",
+                },
+                {
+                  number: 7,
+                  ref: "Genesis 1:7",
+                },
+                {
+                  number: 8,
+                  ref: "Genesis 1:8",
                 },
               ],
             },
@@ -44,14 +58,10 @@ const seedData = {
                 {
                   number: 1,
                   ref: "Genesis 2:1",
-                  hebrewText: "וַיְכֻלּוּ הַשָּׁמַיִם וְהָאָרֶץ וְכָל צְבָאָם",
-                  englishText: "The heavens and the earth were finished, and all their array.",
                 },
                 {
                   number: 2,
                   ref: "Genesis 2:2",
-                  hebrewText: "וַיְכַל אֱלֹהִים בַּיּוֹם הַשְּׁבִיעִי מְלַאכְתּוֹ אֲשֶׁר עָשָׂה",
-                  englishText: "On the seventh day God finished the work that had been undertaken.",
                 },
               ],
             },

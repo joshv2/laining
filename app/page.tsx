@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Role } from "@prisma/client";
 
-import { SignOutButton } from "@/app/signout-button";
 import { ActivateTeacherButton } from "@/app/teacher/activate-teacher-button";
 import { auth } from "@/lib/auth";
 import { isModeratorOrAbove, isSuperuser, isTeacher } from "@/lib/auth/roles";
@@ -21,31 +20,11 @@ export default async function Home() {
   return (
     <div className="grain relative flex min-h-screen flex-col overflow-hidden px-6 py-10 md:px-12">
       <div className="slide-in mx-auto w-full max-w-6xl rounded-3xl border border-orange-900/20 bg-[var(--surface)] p-8 shadow-[0_22px_60px_rgba(88,31,13,0.15)] md:p-12">
-        <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
+        <header className="mb-10">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--ink-soft)]">Laining Collaborative</p>
             <p className="text-hebrew mt-2 text-lg text-[var(--ink-soft)]">לַמֵּד • לְהַקְלִיט • לִלְמֹד</p>
           </div>
-          <nav className="flex items-center gap-3 text-sm font-semibold">
-            <Link className="rounded-full border border-orange-800/25 px-4 py-2 hover:bg-orange-100" href="/api/recordings">
-              Browse API
-            </Link>
-            <Link className="rounded-full border border-orange-800/25 px-4 py-2 hover:bg-orange-100" href="/learn">
-              Learn
-            </Link>
-            {signedIn ? (
-              <Link className="rounded-full border border-orange-800/25 px-4 py-2 hover:bg-orange-100" href="/submit">
-                Submit Recording
-              </Link>
-            ) : null}
-            {signedIn ? (
-              <SignOutButton />
-            ) : (
-              <Link className="rounded-full bg-[var(--accent)] px-4 py-2 text-white hover:bg-[var(--accent-strong)]" href="/signin">
-                Sign In
-              </Link>
-            )}
-          </nav>
         </header>
 
         <main className="grid gap-10 md:grid-cols-[1.2fr_1fr]">
