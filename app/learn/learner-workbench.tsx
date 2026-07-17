@@ -705,13 +705,9 @@ export function LearnerWorkbench() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
       <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <div className="mb-5 rounded-xl border border-orange-900/15 bg-orange-50/70 p-3">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-orange-900">My Assignments</h3>
-          {loadingAssignments ? (
-            <p className="mt-2 text-sm text-orange-900/75">Loading assignments...</p>
-          ) : assignments.length === 0 ? (
-            <p className="mt-2 text-sm text-orange-900/75">No assignments yet. Your teacher-assigned passages will appear here.</p>
-          ) : (
+        {!loadingAssignments && assignments.length > 0 ? (
+          <div className="mb-5 rounded-xl border border-orange-900/15 bg-orange-50/70 p-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-orange-900">My Assignments</h3>
             <ul className="mt-2 space-y-2">
               {assignments.slice(0, 8).map((assignment) => (
                 <li key={assignment.id} className="rounded-lg border border-orange-900/10 bg-white p-2">
@@ -734,8 +730,8 @@ export function LearnerWorkbench() {
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          </div>
+        ) : null}
 
         <h2 className="text-lg font-bold text-orange-950">Choose Text</h2>
         <div className="mt-4 grid gap-3">

@@ -823,7 +823,7 @@ export function SubmitRecordingForm() {
               <div key={pasuk.id} className="rounded-lg border border-orange-900/10 bg-orange-50/50 p-3">
                 <p className="text-xs font-semibold text-orange-900/60 mb-1">{pasuk.ref}</p>
                 <p className="text-lg leading-relaxed text-right text-orange-950 font-hebrew">
-                  {pasuk.hebrewText || "[Text not yet loaded]"}
+                  {pasuk.hebrewText || "[Loading text...]"}
                 </p>
               </div>
             ))}
