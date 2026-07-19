@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { runAlignmentForRecording } from "@/app/api/recordings/[id]/alignment/route";
 import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
 const decisionSchema = z.object({
@@ -84,6 +85,12 @@ export async function POST(request: Request) {
       reason: reason ?? null,
     },
   });
+
+  if (nextStatus === RecordingStatus.APPROVED) {
+    void runAlignmentForRecording(updated.id).catch((error) => {
+      console.error("Failed to start alignment after approval:", error);
+    });
+  }
 
   return Response.json({ recording: updated });
 }

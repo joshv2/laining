@@ -1,3 +1,4 @@
+import { get } from "@vercel/blob";
 import { Role } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
@@ -101,6 +102,186 @@ function getApiKey(): string {
   return apiKey;
 }
 
+async function loadRecordingAudio(recordingId: string): Promise<{ file: File; normalizedType: string; durationMs: number }> {
+  const recording = await prisma.recording.findUnique({
+    where: { id: recordingId },
+    select: {
+      id: true,
+      storageKey: true,
+      durationMs: true,
+    },
+  });
+
+  if (!recording) {
+    throw new Error("Not found");
+  }
+
+  const blob = await get(recording.storageKey, { access: "private" });
+  if (!blob || blob.statusCode !== 200) {
+    throw new Error("Unable to load recording audio from blob storage.");
+  }
+
+  const bytes = await new Response(blob.stream).arrayBuffer();
+  const fileName = blob.blob.pathname.split("/").pop() || "alignment.wav";
+  const file = new File([bytes], fileName, { type: blob.blob.contentType });
+
+  return {
+    file,
+    normalizedType: normalizeMimeType(blob.blob.contentType),
+    durationMs: recording.durationMs,
+  };
+}
+
+export async function runAlignmentForRecording(recordingId: string): Promise<{ ok: true; status: "completed" | "processing"; source: "sync" | "async"; confidence: number | null; wordCount: number }>
+{
+  const { file, normalizedType, durationMs } = await loadRecordingAudio(recordingId);
+
+  await prisma.recording.update({
+    where: { id: recordingId },
+    data: { autoAlignmentStatus: "processing" },
+  });
+
+  const apiKey = getApiKey();
+
+  const shouldUseSync = SUPPORTED_SYNC_AUDIO_TYPES.has(normalizedType) && durationMs <= SYNC_DURATION_LIMIT_MS;
+  if (shouldUseSync) {
+    const transcriptionForm = new FormData();
+    transcriptionForm.set("audio", file, file.name || "alignment.wav");
+    transcriptionForm.set(
+      "config",
+      JSON.stringify({
+        language_code: "he",
+        prompt: "Hebrew Torah chanting.",
+      }),
+    );
+
+    const response = await fetch("https://sync.assemblyai.com/transcribe", {
+      method: "POST",
+      headers: {
+        Authorization: apiKey,
+        "X-AAI-Model": "universal-3-5-pro",
+      },
+      body: transcriptionForm,
+    });
+
+    const rawBody = await response.text();
+    const payload = parseJsonSafe<AssemblyAITranscript>(rawBody);
+    if (!response.ok || !payload) {
+      const message = extractAssemblyError(payload, rawBody);
+      await setAlignmentError(recordingId, message, "assemblyai-sync");
+      throw new Error(message);
+    }
+
+    await setAlignmentSuccess(recordingId, payload, "assemblyai-sync");
+    return {
+      ok: true,
+      status: "completed",
+      source: "sync",
+      confidence: payload.confidence ?? null,
+      wordCount: payload.words?.length ?? 0,
+    };
+  }
+
+  const fileBytes = await file.arrayBuffer();
+  const uploadResponse = await fetch("https://api.assemblyai.com/v2/upload", {
+    method: "POST",
+    headers: {
+      Authorization: apiKey,
+      "Content-Type": "application/octet-stream",
+    },
+    body: fileBytes,
+  });
+
+  const uploadRaw = await uploadResponse.text();
+  const uploadPayload = parseJsonSafe<AssemblyAITranscript>(uploadRaw);
+  if (!uploadResponse.ok || !uploadPayload?.upload_url) {
+    const message = extractAssemblyError(uploadPayload, uploadRaw);
+    await setAlignmentError(recordingId, message, "assemblyai-async");
+    throw new Error(message);
+  }
+
+  const submitResponse = await fetch("https://api.assemblyai.com/v2/transcript", {
+    method: "POST",
+    headers: {
+      Authorization: apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      audio_url: uploadPayload.upload_url,
+      speech_models: ["universal-3-5-pro", "universal-2"],
+      language_code: "he",
+      prompt: "Hebrew Torah chanting.",
+      punctuate: true,
+      format_text: true,
+    }),
+  });
+
+  const submitRaw = await submitResponse.text();
+  const submitPayload = parseJsonSafe<AssemblyAITranscript>(submitRaw);
+  if (!submitResponse.ok || !submitPayload?.id) {
+    const message = extractAssemblyError(submitPayload, submitRaw);
+    await setAlignmentError(recordingId, message, "assemblyai-async");
+    throw new Error(message);
+  }
+
+  for (let attempt = 0; attempt < ASYNC_POLL_ATTEMPTS; attempt += 1) {
+    const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${submitPayload.id}`, {
+      method: "GET",
+      headers: {
+        Authorization: apiKey,
+      },
+    });
+
+    const pollRaw = await pollResponse.text();
+    const pollPayload = parseJsonSafe<AssemblyAITranscript>(pollRaw);
+
+    if (!pollResponse.ok || !pollPayload) {
+      const message = extractAssemblyError(pollPayload, pollRaw);
+      await setAlignmentError(recordingId, message, "assemblyai-async");
+      throw new Error(message);
+    }
+
+    if (pollPayload.status === "completed") {
+      await setAlignmentSuccess(recordingId, pollPayload, "assemblyai-async");
+      return {
+        ok: true,
+        status: "completed",
+        source: "async",
+        confidence: pollPayload.confidence ?? null,
+        wordCount: pollPayload.words?.length ?? 0,
+      };
+    }
+
+    if (pollPayload.status === "error") {
+      const message = extractAssemblyError(pollPayload, pollRaw);
+      await setAlignmentError(recordingId, message, "assemblyai-async");
+      throw new Error(message);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, ASYNC_POLL_INTERVAL_MS));
+  }
+
+  await prisma.recording.update({
+    where: { id: recordingId },
+    data: {
+      autoAlignmentStatus: "processing",
+      autoAlignmentResult: {
+        source: "assemblyai-async",
+        languageCode: "he",
+        transcriptId: submitPayload.id,
+      },
+    },
+  });
+
+  return {
+    ok: true,
+    status: "processing",
+    source: "async",
+    confidence: null,
+    wordCount: 0,
+  };
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) {
@@ -135,147 +316,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const normalizedType = normalizeMimeType(file.type || "");
 
-  await prisma.recording.update({
-    where: { id: recording.id },
-    data: { autoAlignmentStatus: "processing" },
-  });
-
-  const apiKey = getApiKey();
-
-  const shouldUseSync = SUPPORTED_SYNC_AUDIO_TYPES.has(normalizedType) && recording.durationMs <= SYNC_DURATION_LIMIT_MS;
-  if (shouldUseSync) {
-    const transcriptionForm = new FormData();
-    transcriptionForm.set("audio", file, file.name || "alignment.wav");
-    transcriptionForm.set(
-      "config",
-      JSON.stringify({
-        language_code: "he",
-        prompt: "Hebrew Torah chanting.",
-      }),
+  try {
+    const result = await runAlignmentForRecording(recording.id);
+    return Response.json(
+      result.status === "completed"
+        ? result
+        : {
+            ...result,
+            reason: "Alignment is still processing. Please refresh shortly.",
+          },
     );
-
-    const response = await fetch("https://sync.assemblyai.com/transcribe", {
-      method: "POST",
-      headers: {
-        Authorization: apiKey,
-        "X-AAI-Model": "universal-3-5-pro",
-      },
-      body: transcriptionForm,
-    });
-
-    const rawBody = await response.text();
-    const payload = parseJsonSafe<AssemblyAITranscript>(rawBody);
-    if (!response.ok || !payload) {
-      const message = extractAssemblyError(payload, rawBody);
-      await setAlignmentError(recording.id, message, "assemblyai-sync");
-      return Response.json({ error: message }, { status: 502 });
-    }
-
-    await setAlignmentSuccess(recording.id, payload, "assemblyai-sync");
-    return Response.json({
-      ok: true,
-      status: "completed",
-      source: "sync",
-      confidence: payload.confidence ?? null,
-      wordCount: payload.words?.length ?? 0,
-    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Alignment failed";
+    return Response.json({ error: message }, { status: message === "Not found" ? 404 : 502 });
   }
-
-  const fileBytes = await file.arrayBuffer();
-  const uploadResponse = await fetch("https://api.assemblyai.com/v2/upload", {
-    method: "POST",
-    headers: {
-      Authorization: apiKey,
-      "Content-Type": "application/octet-stream",
-    },
-    body: fileBytes,
-  });
-
-  const uploadRaw = await uploadResponse.text();
-  const uploadPayload = parseJsonSafe<AssemblyAITranscript>(uploadRaw);
-  if (!uploadResponse.ok || !uploadPayload?.upload_url) {
-    const message = extractAssemblyError(uploadPayload, uploadRaw);
-    await setAlignmentError(recording.id, message, "assemblyai-async");
-    return Response.json({ error: message }, { status: 502 });
-  }
-
-  const submitResponse = await fetch("https://api.assemblyai.com/v2/transcript", {
-    method: "POST",
-    headers: {
-      Authorization: apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      audio_url: uploadPayload.upload_url,
-      speech_models: ["universal-3-5-pro", "universal-2"],
-      language_code: "he",
-      prompt: "Hebrew Torah chanting.",
-      punctuate: true,
-      format_text: true,
-    }),
-  });
-
-  const submitRaw = await submitResponse.text();
-  const submitPayload = parseJsonSafe<AssemblyAITranscript>(submitRaw);
-  if (!submitResponse.ok || !submitPayload?.id) {
-    const message = extractAssemblyError(submitPayload, submitRaw);
-    await setAlignmentError(recording.id, message, "assemblyai-async");
-    return Response.json({ error: message }, { status: 502 });
-  }
-
-  for (let attempt = 0; attempt < ASYNC_POLL_ATTEMPTS; attempt += 1) {
-    const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${submitPayload.id}`, {
-      method: "GET",
-      headers: {
-        Authorization: apiKey,
-      },
-    });
-
-    const pollRaw = await pollResponse.text();
-    const pollPayload = parseJsonSafe<AssemblyAITranscript>(pollRaw);
-
-    if (!pollResponse.ok || !pollPayload) {
-      const message = extractAssemblyError(pollPayload, pollRaw);
-      await setAlignmentError(recording.id, message, "assemblyai-async");
-      return Response.json({ error: message }, { status: 502 });
-    }
-
-    if (pollPayload.status === "completed") {
-      await setAlignmentSuccess(recording.id, pollPayload, "assemblyai-async");
-      return Response.json({
-        ok: true,
-        status: "completed",
-        source: "async",
-        confidence: pollPayload.confidence ?? null,
-        wordCount: pollPayload.words?.length ?? 0,
-      });
-    }
-
-    if (pollPayload.status === "error") {
-      const message = extractAssemblyError(pollPayload, pollRaw);
-      await setAlignmentError(recording.id, message, "assemblyai-async");
-      return Response.json({ error: message }, { status: 502 });
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, ASYNC_POLL_INTERVAL_MS));
-  }
-
-  await prisma.recording.update({
-    where: { id: recording.id },
-    data: {
-      autoAlignmentStatus: "processing",
-      autoAlignmentResult: {
-        source: "assemblyai-async",
-        languageCode: "he",
-        transcriptId: submitPayload.id,
-      },
-    },
-  });
-
-  return Response.json({
-    ok: true,
-    status: "processing",
-    source: "async",
-    reason: "Alignment is still processing. Please refresh shortly.",
-  });
 }

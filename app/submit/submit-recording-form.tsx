@@ -719,31 +719,7 @@ export function SubmitRecordingForm() {
         throw new Error(boundaryError.error ?? "Failed to save boundaries");
       }
 
-      let alignmentMessage = "";
-      if (durationMs <= 120000 && audioFile.size <= 40 * 1024 * 1024) {
-        const alignmentForm = new FormData();
-        alignmentForm.set("file", audioFile);
-
-        const alignmentResponse = await fetch(`/api/recordings/${created.recording.id}/alignment`, {
-          method: "POST",
-          body: alignmentForm,
-        });
-
-        const alignmentPayload = await alignmentResponse.json().catch(() => ({}));
-        if (!alignmentResponse.ok) {
-          throw new Error((alignmentPayload as { error?: string }).error ?? "Auto-alignment failed");
-        }
-
-        if ((alignmentPayload as { status?: string }).status === "completed") {
-          alignmentMessage = " Auto-alignment completed.";
-        } else if ((alignmentPayload as { status?: string }).status === "processing") {
-          alignmentMessage = " Auto-alignment is processing in the background.";
-        } else if ((alignmentPayload as { status?: string }).status === "skipped") {
-          alignmentMessage = " Auto-alignment was skipped for this file.";
-        }
-      }
-
-      setSuccessMessage(`Recording submitted successfully. It is now pending moderator approval.${alignmentMessage}`);
+      setSuccessMessage("Recording submitted successfully. It is now pending moderator approval.");
       setAudioFile(null);
       setRecordingTitle("");
       setDurationMs(0);
