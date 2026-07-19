@@ -16,8 +16,12 @@ const ALLOWED_AUDIO_TYPES = new Set([
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
-function toForwardedHeaders(source: Headers): Headers {
-  const forwarded = new Headers();
+type HeaderGetter = {
+  get(name: string): string | null;
+};
+
+function toForwardedHeaders(source: HeaderGetter): Record<string, string> {
+  const forwarded: Record<string, string> = {};
   const names = [
     "content-type",
     "content-length",
@@ -31,7 +35,7 @@ function toForwardedHeaders(source: Headers): Headers {
   for (const name of names) {
     const value = source.get(name);
     if (value) {
-      forwarded.set(name, value);
+      forwarded[name] = value;
     }
   }
 
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async (pathname, _clientPayload, _multipart) => {
         if (!pathname.startsWith("recordings/")) {
           throw new Error("Invalid upload path.");
         }
@@ -96,7 +100,7 @@ export async function POST(request: Request) {
         return {
           allowedContentTypes: Array.from(ALLOWED_AUDIO_TYPES),
           maximumSizeInBytes: MAX_UPLOAD_BYTES,
-          validUntil: new Date(Date.now() + 5 * 60 * 1000),
+          validUntil: Date.now() + 5 * 60 * 1000,
           allowOverwrite: false,
           addRandomSuffix: false,
         };
