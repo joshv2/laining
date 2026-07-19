@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ChapterSummary = {
@@ -41,6 +42,25 @@ type BoundaryDraft = {
   startMs: string;
   endMs: string;
 };
+
+const ALLOWED_AUDIO_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/x-m4a",
+]);
+
+function normalizeMimeType(value: string): string {
+  return value.split(";")[0].trim().toLowerCase();
+}
+
+function sanitizeFileName(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
 async function detectAudioDurationMs(file: File): Promise<number> {
   const objectUrl = URL.createObjectURL(file);
@@ -614,6 +634,12 @@ export function SubmitRecordingForm() {
       return;
     }
 
+    const normalizedType = normalizeMimeType(audioFile.type || "");
+    if (!ALLOWED_AUDIO_TYPES.has(normalizedType)) {
+      setError(`Unsupported audio type: ${audioFile.type || "unknown"}`);
+      return;
+    }
+
     const parsedBoundaries = isSinglePasukRange
       ? [{ pasukId: primaryPasukId, startMs: 0, endMs: durationMs }]
       : boundaries.map((item) => ({
@@ -641,20 +667,17 @@ export function SubmitRecordingForm() {
     setSubmitting(true);
 
     try {
-      const uploadForm = new FormData();
-      uploadForm.set("file", audioFile);
+      const extension = audioFile.name.includes(".")
+        ? audioFile.name.slice(audioFile.name.lastIndexOf("."))
+        : ".bin";
+      const safeName = sanitizeFileName(audioFile.name || `upload${extension}`);
+      const objectKey = `recordings/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeName}`;
 
-      const uploadResponse = await fetch("/api/uploads/audio", {
-        method: "POST",
-        body: uploadForm,
+      const blob = await upload(objectKey, audioFile, {
+        access: "private",
+        handleUploadUrl: "/api/uploads/audio",
+        contentType: normalizedType,
       });
-
-      if (!uploadResponse.ok) {
-        const uploadError = await uploadResponse.json();
-        throw new Error(uploadError.error ?? "Upload failed");
-      }
-
-      const upload = await uploadResponse.json();
 
       const nussachPayload = nussach === "Other" ? "Custom" : nussach;
       const createResponse = await fetch("/api/recordings", {
@@ -670,8 +693,8 @@ export function SubmitRecordingForm() {
           title: recordingTitle.trim() || undefined,
           nussach: nussachPayload,
           nussachCustom: nussach === "Other" ? nussachCustom : undefined,
-          storageKey: upload.objectKey,
-          publicUrl: `${window.location.origin}${upload.publicUrl}`,
+          storageKey: blob.pathname,
+          publicUrl: `${window.location.origin}/api/uploads/audio?key=${encodeURIComponent(blob.pathname)}`,
           durationMs,
         }),
       });
