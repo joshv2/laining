@@ -44,7 +44,7 @@ type RecordingBoundary = {
   pasuk: {
     ref: string;
     number: number;
-    hebrewText: string;
+    hebrewText: string | null;
     englishText: string | null;
   };
 };
@@ -163,7 +163,7 @@ function getSingAlongWordIndex(boundary: RecordingBoundary | null, currentMs: nu
     return -1;
   }
 
-  const words = splitHebrewWords(boundary.pasuk.hebrewText);
+  const words = splitHebrewWords(boundary.pasuk.hebrewText ?? "");
   if (words.length === 0) {
     return -1;
   }
@@ -664,7 +664,7 @@ export function LearnerWorkbench() {
       return;
     }
 
-    const words = splitHebrewWords(boundary.pasuk.hebrewText);
+    const words = splitHebrewWords(boundary.pasuk.hebrewText ?? "");
     if (words.length === 0) {
       seekWithinPasuk(boundary.startMs);
       return;
@@ -934,25 +934,31 @@ export function LearnerWorkbench() {
                 <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
                   <p className="text-right text-sm font-semibold text-orange-900/70">{formatPasukRef(focusedBoundary.pasuk.ref)}</p>
                   <div className="text-hebrew mt-3 w-full text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
-                    {splitHebrewWords(focusedBoundary.pasuk.hebrewText).map((word, index) => {
-                      const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
-                      return (
-                        <span key={`${focusedBoundary.pasukId}-${index}-${word}`} className="inline-block align-baseline">
-                          <button
-                            className={`mb-2 cursor-pointer rounded-lg px-2 py-1 text-right transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
-                              isActive
-                                ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
-                                : "text-orange-950/70 hover:bg-orange-200/60"
-                            }`}
-                            onClick={() => seekToWord(focusedBoundary, index)}
-                            title="Click to seek to this word"
-                            type="button"
-                          >
-                            {word}
-                          </button>{" "}
-                        </span>
-                      );
-                    })}
+                    {splitHebrewWords(focusedBoundary.pasuk.hebrewText ?? "").length > 0 ? (
+                      splitHebrewWords(focusedBoundary.pasuk.hebrewText ?? "").map((word, index) => {
+                        const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
+                        return (
+                          <span key={`${focusedBoundary.pasukId}-${index}-${word}`} className="inline-block align-baseline">
+                            <button
+                              className={`mb-2 cursor-pointer rounded-lg px-2 py-1 text-right transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
+                                isActive
+                                  ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
+                                  : "text-orange-950/70 hover:bg-orange-200/60"
+                              }`}
+                              onClick={() => seekToWord(focusedBoundary, index)}
+                              title="Click to seek to this word"
+                              type="button"
+                            >
+                              {word}
+                            </button>{" "}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <p className="rounded-lg border border-dashed border-orange-900/20 bg-white/70 px-3 py-4 text-right text-sm text-orange-900/70">
+                        Pasuk text is not loaded yet.
+                      </p>
+                    )}
                   </div>
                   <p className="mt-3 text-left text-xs font-semibold text-orange-900/70" dir="ltr">Tip: click any word to jump playback inside this pasuk.</p>
                 </div>

@@ -51,9 +51,9 @@ export default async function Home() {
                     </Link>
                   ) : null}
                   {isSuperuser(role) ? (
-                    <Link className="rounded-full bg-white px-3 py-1 text-xs font-bold hover:bg-orange-50" href="/api/import/sefaria">
+                    <a className="rounded-full bg-white px-3 py-1 text-xs font-bold hover:bg-orange-50" href="/api/import/sefaria" rel="noreferrer">
                       Sefaria Import API
-                    </Link>
+                    </a>
                   ) : null}
                 </div>
               ) : (
