@@ -10,7 +10,7 @@ import { auth } from "@/lib/auth";
 import { isModeratorOrAbove, isSuperuser, isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 import { countUnreadSuperuserNotifications } from "@/lib/services/notifications";
-
+import { Analytics } from "@vercel/analytics/next"
 import "./globals.css";
 
 const rubik = Rubik({
@@ -86,6 +86,7 @@ export default async function RootLayout({
       lang="en"
       className={`${rubik.variable} ${geistMono.variable} ${notoSerifHebrew.variable} ${shlomoStam.variable} h-full antialiased`}
     >
+      <Analytics />
       <body className="min-h-full flex flex-col">
         {gaMeasurementId ? (
           <>
