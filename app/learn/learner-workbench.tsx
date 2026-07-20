@@ -283,6 +283,7 @@ export function LearnerWorkbench() {
     if (!chapterId) return bookPesukim;
     return bookPesukim.filter((item) => item.chapterId === chapterId);
   }, [bookPesukim, chapterId]);
+  const selectedPasuk = useMemo(() => chapterPesukim.find((item) => item.id === pasukId) ?? null, [chapterPesukim, pasukId]);
 
   const selectedRecording = useMemo(
     () => recordings.find((item) => item.id === selectedRecordingId) ?? null,
@@ -307,6 +308,27 @@ export function LearnerWorkbench() {
         ? selectedPasukBoundaryIndex
         : focusedBoundaryIndex;
   const focusedBoundary = activeBoundaries[effectiveBoundaryIndex] ?? null;
+  const displayBoundary = useMemo<RecordingBoundary | null>(() => {
+    if (focusedBoundary) {
+      return focusedBoundary;
+    }
+
+    if (!selectedRecording || !selectedPasuk || recordingAccessMode !== "assigned-only") {
+      return null;
+    }
+
+    return {
+      pasukId: selectedPasuk.id,
+      startMs: 0,
+      endMs: Math.max(1, selectedRecording.durationMs),
+      pasuk: {
+        ref: selectedPasuk.ref,
+        number: selectedPasuk.number,
+        hebrewText: selectedPasuk.hebrewText,
+        englishText: selectedPasuk.englishText,
+      },
+    };
+  }, [focusedBoundary, recordingAccessMode, selectedPasuk, selectedRecording]);
   const alignmentWords = selectedRecording?.autoAlignmentResult?.words ?? null;
 
   useEffect(() => {
@@ -405,10 +427,16 @@ export function LearnerWorkbench() {
       for (const pasukId of needsLoading) {
         if (cancelled) break;
         try {
-          await fetch("/api/text/ensure-loaded", {
+          const response = await fetch("/api/text/ensure-loaded", {
             method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify({ pasukId }),
           });
+          if (!response.ok) {
+            console.error(`Failed to load text for pasuk ${pasukId}: status ${response.status}`);
+          }
         } catch (error) {
           console.error(`Failed to load text for pasuk ${pasukId}:`, error);
         }
@@ -606,7 +634,7 @@ export function LearnerWorkbench() {
 
   function playCurrentPasuk() {
     const audio = audioRef.current;
-    const boundary = activeBoundaries[selectedPasukBoundaryIndex] ?? focusedBoundary;
+    const boundary = activeBoundaries[selectedPasukBoundaryIndex] ?? displayBoundary;
     if (!audio || !boundary) return;
 
     audio.pause();
@@ -643,7 +671,7 @@ export function LearnerWorkbench() {
 
   function seekWithinPasuk(nextMs: number) {
     const audio = audioRef.current;
-    const boundary = focusedBoundary;
+    const boundary = displayBoundary;
     if (!audio || !boundary) return;
 
     const clamped = clamp(nextMs, boundary.startMs, boundary.endMs);
@@ -897,25 +925,25 @@ export function LearnerWorkbench() {
               <p className="text-xs font-bold uppercase tracking-wider text-orange-900/80">Current Time</p>
               <p className="font-mono text-2xl font-bold text-orange-950">{ms(currentMs)}</p>
 
-              {focusedBoundary ? (
+              {displayBoundary ? (
                 <>
-                  <p className="mt-2 text-sm font-semibold text-orange-950">Focused Pasuk: {formatPasukRef(focusedBoundary.pasuk.ref)}</p>
+                  <p className="mt-2 text-sm font-semibold text-orange-950">Focused Pasuk: {formatPasukRef(displayBoundary.pasuk.ref)}</p>
                   <input
                     className="mt-2 w-full"
-                    max={focusedBoundary.endMs}
-                    min={focusedBoundary.startMs}
+                    max={displayBoundary.endMs}
+                    min={displayBoundary.startMs}
                     onChange={(event) => seekWithinPasuk(Number(event.target.value))}
                     type="range"
-                    value={clamp(currentMs, focusedBoundary.startMs, focusedBoundary.endMs)}
+                    value={clamp(currentMs, displayBoundary.startMs, displayBoundary.endMs)}
                   />
                   <p className="mt-1 text-xs text-orange-900/75">
-                    Seek within pasuk from {ms(focusedBoundary.startMs)} to {ms(focusedBoundary.endMs)}
+                    Seek within pasuk from {ms(displayBoundary.startMs)} to {ms(displayBoundary.endMs)}
                   </p>
                 </>
               ) : null}
             </div>
 
-            {recordingAccessMode === "assigned-only" && focusedBoundary ? (
+            {recordingAccessMode === "assigned-only" && displayBoundary ? (
               <section className="mt-4 rounded-2xl border border-orange-900/15 bg-white p-4 shadow-[0_8px_18px_rgba(88,31,13,0.08)]">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div>
@@ -932,20 +960,20 @@ export function LearnerWorkbench() {
                 </div>
 
                 <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
-                  <p className="text-right text-sm font-semibold text-orange-900/70">{formatPasukRef(focusedBoundary.pasuk.ref)}</p>
+                  <p className="text-right text-sm font-semibold text-orange-900/70">{formatPasukRef(displayBoundary.pasuk.ref)}</p>
                   <div className="text-hebrew mt-3 w-full text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
-                    {splitHebrewWords(focusedBoundary.pasuk.hebrewText ?? "").length > 0 ? (
-                      splitHebrewWords(focusedBoundary.pasuk.hebrewText ?? "").map((word, index) => {
-                        const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
+                    {splitHebrewWords(displayBoundary.pasuk.hebrewText ?? "").length > 0 ? (
+                      splitHebrewWords(displayBoundary.pasuk.hebrewText ?? "").map((word, index) => {
+                        const isActive = index === getSingAlongWordIndex(displayBoundary, currentMs, alignmentWords);
                         return (
-                          <span key={`${focusedBoundary.pasukId}-${index}-${word}`} className="inline-block align-baseline">
+                          <span key={`${displayBoundary.pasukId}-${index}-${word}`} className="inline-block align-baseline">
                             <button
                               className={`mb-2 cursor-pointer rounded-lg px-2 py-1 text-right transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
                                 isActive
                                   ? "bg-orange-600 text-white shadow-[0_6px_14px_rgba(234,88,12,0.28)]"
                                   : "text-orange-950/70 hover:bg-orange-200/60"
                               }`}
-                              onClick={() => seekToWord(focusedBoundary, index)}
+                              onClick={() => seekToWord(displayBoundary, index)}
                               title="Click to seek to this word"
                               type="button"
                             >
@@ -963,8 +991,8 @@ export function LearnerWorkbench() {
                   <p className="mt-3 text-left text-xs font-semibold text-orange-900/70" dir="ltr">Tip: click any word to jump playback inside this pasuk.</p>
                 </div>
 
-                {focusedBoundary.pasuk.englishText ? (
-                  <p className="mt-3 text-sm text-orange-900/75">Translation: {focusedBoundary.pasuk.englishText}</p>
+                {displayBoundary.pasuk.englishText ? (
+                  <p className="mt-3 text-sm text-orange-900/75">Translation: {displayBoundary.pasuk.englishText}</p>
                 ) : null}
               </section>
             ) : null}
