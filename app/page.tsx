@@ -23,7 +23,7 @@ export default async function Home() {
         <header className="mb-10">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--ink-soft)]">Laining Collaborative</p>
-            <p className="text-hebrew mt-2 text-lg text-[var(--ink-soft)]">לַמֵּד • לְהַקְלִיט • לִלְמֹד</p>
+            <p className="text-hebrew mt-2 text-lg text-[var(--ink-soft)]">לְלַמֵּד • לְהַקְלִיט • לִלְמֹד</p>
           </div>
         </header>
 
