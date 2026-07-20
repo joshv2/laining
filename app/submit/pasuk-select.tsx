@@ -39,14 +39,11 @@ export default function PasukSelect({
 }: PasukSelectProps) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState<number>(10);
-  
-  // 1. Ref to attach to the top-level container div
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selectedPasuk = rangePesukim?.find((p) => p.id === endPasukId);
   const visiblePesukim = rangePesukim?.slice(0, visibleCount) || [];
 
-  // 2. Automatically close when clicking outside of this component
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -57,10 +54,8 @@ export default function PasukSelect({
       }
     }
 
-    // Attach event listener when dropdown is mounted
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      // Clean up event listener when unmounted
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
@@ -73,7 +68,6 @@ export default function PasukSelect({
   };
 
   return (
-    /* 3. Attach containerRef to the root wrapper div */
     <div ref={containerRef} className="relative w-full mt-2">
       <button
         type="button"
@@ -95,8 +89,17 @@ export default function PasukSelect({
           {visiblePesukim.map((p) => (
             <li
               key={p.id}
-              onClick={() => {
+              onClick={(e) => {
+                // Prevent parent <label> default behavior from re-triggering the toggle button.
+                e.preventDefault();
+
+                // 1. Stop the event from bubbling up to any document click handlers
+                e.stopPropagation(); 
+                
+                // 2. Pass the ID back up to the page state
                 handleEndPasukChange(p.id);
+                
+                // 3. Close the dropdown menu UI
                 setIsOpen(false);
               }}
               className="cursor-pointer px-3 py-2 hover:bg-orange-50 text-sm"
