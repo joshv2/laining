@@ -2,6 +2,7 @@
 
 import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import PasukSelect from './pasuk-select';
 
 type ChapterSummary = {
   id: string;
@@ -835,22 +836,20 @@ export function SubmitRecordingForm() {
       <section className="grid gap-4 md:grid-cols-2">
         <label className="text-sm font-semibold text-orange-950">
           Start Pasuk
-          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleStartPasukChange(event.target.value)} value={startPasukId}>
-            <option value="">Select start</option>
-            {rangePesukim.map((pasuk) => (
-              <option key={pasuk.id} value={pasuk.id}>{formatPasukRef(pasuk.ref)} (Ch. {pasuk.chapterNumber})</option>
-            ))}
-          </select>
+          <PasukSelect rangePesukim={rangePesukim}
+            endPasukId={startPasukId}
+            handleEndPasukChange={handleStartPasukChange}
+            loadingPesukim={loadingPesukim}
+          />
         </label>
 
         <label className="text-sm font-semibold text-orange-950">
           End Pasuk
-          <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleEndPasukChange(event.target.value)} value={endPasukId}>
-            <option value="">Select end</option>
-            {rangePesukim.map((pasuk) => (
-              <option key={pasuk.id} value={pasuk.id}>{formatPasukRef(pasuk.ref)} (Ch. {pasuk.chapterNumber})</option>
-            ))}
-          </select>
+          <PasukSelect rangePesukim={rangePesukim}
+            endPasukId={endPasukId}
+            handleEndPasukChange={handleEndPasukChange}
+            loadingPesukim={loadingPesukim}
+          />
         </label>
       </section>
 
