@@ -5,6 +5,7 @@ import { RecordingStatus, Role } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
+import { formatPasukRef } from "@/lib/formatters/pasuk";
 
 import { ActivateTeacherButton } from "./activate-teacher-button";
 import { TeacherDashboardClient } from "./teacher-dashboard-client";
@@ -341,7 +342,7 @@ export default async function TeacherPage() {
       title: assignment.recording.title,
       nussach: assignment.recording.nussach,
       nussachCustom: assignment.recording.nussachCustom,
-      primaryPasukRef: assignment.recording.primaryPasuk.ref,
+      primaryPasukRef: formatPasukRef(assignment.recording.primaryPasuk.ref),
     },
   }));
 
@@ -409,7 +410,7 @@ export default async function TeacherPage() {
       for (const [pasukRef, count] of row.replayByPasuk) {
         if (count > topReplayCount) {
           topReplayCount = count;
-          topReplayPasukRef = pasukRef;
+          topReplayPasukRef = formatPasukRef(pasukRef);
         }
       }
 
@@ -459,7 +460,7 @@ export default async function TeacherPage() {
     nussach: recording.nussach,
     nussachCustom: recording.nussachCustom,
     durationMs: recording.durationMs,
-    primaryPasukRef: recording.primaryPasuk.ref,
+    primaryPasukRef: formatPasukRef(recording.primaryPasuk.ref),
   }));
 
         const teacherAccess = {

@@ -87,9 +87,11 @@ export async function POST(request: Request) {
   });
 
   if (nextStatus === RecordingStatus.APPROVED) {
-    void runAlignmentForRecording(updated.id).catch((error) => {
-      console.error("Failed to start alignment after approval:", error);
-    });
+    try {
+      await runAlignmentForRecording(updated.id);
+    } catch (error) {
+      console.error("Failed to run alignment after approval:", error);
+    }
   }
 
   return Response.json({ recording: updated });

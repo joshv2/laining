@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatPasukRef } from "@/lib/formatters/pasuk";
 import PasukSelect from "@/app/submit/pasuk-select";
 
 type ChapterSummary = {
@@ -714,7 +715,7 @@ export function LearnerWorkbench() {
                 <li key={assignment.id} className="rounded-lg border border-orange-900/10 bg-white p-2">
                   <p className="text-sm font-semibold text-orange-950">
                     {assignment.recording.title ? `${assignment.recording.title} - ` : ""}
-                    {assignment.recording.primaryPasuk.ref} - {assignment.recording.nussach}
+                    {formatPasukRef(assignment.recording.primaryPasuk.ref)} - {assignment.recording.nussach}
                     {assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}
                   </p>
                   <p className="mt-1 text-xs text-orange-900/75">
@@ -835,7 +836,7 @@ export function LearnerWorkbench() {
                     </p>
                     <p className="mt-1 text-xs text-orange-900/70">
                       Added {formatDateTime(recording.createdAt)} •
-                      Range {recording.boundaries[0]?.pasuk.ref ?? "Unknown"} to {recording.boundaries[recording.boundaries.length - 1]?.pasuk.ref ?? "Unknown"}
+                      Range {formatPasukRef(recording.boundaries[0]?.pasuk.ref ?? "Unknown")} to {formatPasukRef(recording.boundaries[recording.boundaries.length - 1]?.pasuk.ref ?? "Unknown")}
                     </p>
                   </button>
                 </li>
@@ -862,7 +863,7 @@ export function LearnerWorkbench() {
             </p>
             <p className="text-sm text-orange-900/80">Duration: {ms(selectedRecording.durationMs)}</p>
             <p className="text-sm text-orange-900/80">
-              Covers Pesukim: {activeBoundaries.map((item) => item.pasuk.ref).join(", ")}
+              Covers Pesukim: {activeBoundaries.map((item) => formatPasukRef(item.pasuk.ref)).join(", ")}
             </p>
 
             <audio className="mt-3 w-full" controls preload="metadata" ref={audioRef} src={selectedRecording.publicUrl} />
@@ -898,7 +899,7 @@ export function LearnerWorkbench() {
 
               {focusedBoundary ? (
                 <>
-                  <p className="mt-2 text-sm font-semibold text-orange-950">Focused Pasuk: {focusedBoundary.pasuk.ref}</p>
+                  <p className="mt-2 text-sm font-semibold text-orange-950">Focused Pasuk: {formatPasukRef(focusedBoundary.pasuk.ref)}</p>
                   <input
                     className="mt-2 w-full"
                     max={focusedBoundary.endMs}
@@ -931,7 +932,7 @@ export function LearnerWorkbench() {
                 </div>
 
                 <div className="mt-3 rounded-2xl bg-orange-50/80 p-4" dir="rtl" lang="he">
-                  <p className="text-right text-sm font-semibold text-orange-900/70">{focusedBoundary.pasuk.ref}</p>
+                  <p className="text-right text-sm font-semibold text-orange-900/70">{formatPasukRef(focusedBoundary.pasuk.ref)}</p>
                   <div className="text-hebrew mt-3 w-full text-right text-2xl leading-[2.1] text-orange-950 md:text-3xl">
                     {splitHebrewWords(focusedBoundary.pasuk.hebrewText).map((word, index) => {
                       const isActive = index === getSingAlongWordIndex(focusedBoundary, currentMs, alignmentWords);
@@ -978,7 +979,7 @@ export function LearnerWorkbench() {
                       className={index === effectiveBoundaryIndex ? "bg-lime-50" : ""}
                       onClick={() => jumpToBoundary(index)}
                     >
-                      <td className="cursor-pointer px-3 py-2 font-semibold text-orange-950">{boundary.pasuk.ref}</td>
+                      <td className="cursor-pointer px-3 py-2 font-semibold text-orange-950">{formatPasukRef(boundary.pasuk.ref)}</td>
                       <td className="px-3 py-2 font-mono text-orange-900">{ms(boundary.startMs)}</td>
                       <td className="px-3 py-2 font-mono text-orange-900">{ms(boundary.endMs)}</td>
                     </tr>

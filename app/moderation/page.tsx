@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { RecordingStatus, Role } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
+import { formatPasukRef } from "@/lib/formatters/pasuk";
 import { prisma } from "@/lib/db/client";
 import { isModeratorOrAbove } from "@/lib/auth/roles";
 import { ModerationAudioReviewer } from "./moderation-audio-reviewer";
@@ -119,9 +120,9 @@ export default async function ModerationPage() {
             <article key={recording.id} className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold text-orange-950">{recording.primaryPasuk.ref}</h2>
+                  <h2 className="text-lg font-bold text-orange-950">{formatPasukRef(recording.primaryPasuk.ref)}</h2>
                   <p className="mt-1 text-sm text-orange-900/80">
-                    Range: {recording.rangeStartPasuk.ref} to {recording.rangeEndPasuk.ref}
+                    Range: {formatPasukRef(recording.rangeStartPasuk.ref)} to {formatPasukRef(recording.rangeEndPasuk.ref)}
                   </p>
                   <p className="text-sm text-orange-900/80">
                     Submitted by {recording.user.name ?? recording.user.email ?? "Unknown user"}
@@ -143,7 +144,7 @@ export default async function ModerationPage() {
               <ModerationAudioReviewer
                 boundaries={recording.boundaries.map((item) => ({
                   pasukId: item.pasukId,
-                  pasukRef: item.pasuk.ref,
+                  pasukRef: formatPasukRef(item.pasuk.ref),
                   startMs: item.startMs,
                   endMs: item.endMs,
                 }))}
