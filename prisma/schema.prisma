@@ -165,6 +165,7 @@ model Work {
   slug      String    @unique
   titleEn   String
   titleHe   String
+  order     Int       @default(0)
   kind      WorkType
   books     Book[]
   createdAt DateTime  @default(now())
@@ -179,6 +180,7 @@ model Book {
   slug      String
   titleEn   String
   titleHe   String
+  order     Int       @default(0)
   chapters  Chapter[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

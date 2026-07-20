@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Script from "next/script";
 import { Role } from "@prisma/client";
+import localFont from "next/font/local";
 import { Geist_Mono, Noto_Serif_Hebrew, Rubik } from "next/font/google";
 
 import { SignOutButton } from "@/app/signout-button";
@@ -27,6 +28,12 @@ const notoSerifHebrew = Noto_Serif_Hebrew({
   variable: "--font-hebrew",
   subsets: ["hebrew", "latin"],
   weight: ["400", "600", "700"],
+});
+
+const shlomoStam = localFont({
+  src: "../ShlomoStam.woff2",
+  variable: "--font-hebrew-pasuk",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -77,7 +84,7 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${rubik.variable} ${geistMono.variable} ${notoSerifHebrew.variable} h-full antialiased`}
+      className={`${rubik.variable} ${geistMono.variable} ${notoSerifHebrew.variable} ${shlomoStam.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         {gaMeasurementId ? (

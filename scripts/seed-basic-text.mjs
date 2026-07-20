@@ -8,67 +8,23 @@ const seedData = {
       slug: "torah",
       titleEn: "Torah",
       titleHe: "תורה",
+      order: 1,
       kind: WorkType.TORAH,
-      books: [
-        {
-          slug: "genesis",
-          titleEn: "Genesis",
-          titleHe: "בראשית",
-          chapters: [
-            {
-              number: 1,
-              pesukim: [
-                {
-                  number: 1,
-                  ref: "Genesis 1:1",
-                },
-                {
-                  number: 2,
-                  ref: "Genesis 1:2",
-                },
-                {
-                  number: 3,
-                  ref: "Genesis 1:3",
-                },
-                {
-                  number: 4,
-                  ref: "Genesis 1:4",
-                },
-                {
-                  number: 5,
-                  ref: "Genesis 1:5",
-                },
-                {
-                  number: 6,
-                  ref: "Genesis 1:6",
-                },
-                {
-                  number: 7,
-                  ref: "Genesis 1:7",
-                },
-                {
-                  number: 8,
-                  ref: "Genesis 1:8",
-                },
-              ],
-            },
-            {
-              number: 2,
-              pesukim: [
-                {
-                  number: 1,
-                  ref: "Genesis 2:1",
-                },
-                {
-                  number: 2,
-                  ref: "Genesis 2:2",
-                },
-              ],
-            },
-          ],
-        },
-      ],
     },
+    {
+      slug: "prophets",
+      titleEn: "Neviim",
+      titleHe: "נביאים",
+      order: 2,
+      kind: WorkType.NEVIIM,
+    },
+    {
+      slug: "writings",
+      titleEn: "Ketuvim",
+      titleHe: "כתובים",
+      order: 3,
+      kind: WorkType.KETUVIM,
+    }
   ],
 };
 
@@ -98,56 +54,18 @@ async function main() {
       update: {
         titleEn: workInput.titleEn,
         titleHe: workInput.titleHe,
+        order: workInput.order,
         kind: workInput.kind,
       },
       create: {
         slug: workInput.slug,
         titleEn: workInput.titleEn,
         titleHe: workInput.titleHe,
+        order: workInput.order,
         kind: workInput.kind,
       },
     });
 
-    for (const bookInput of workInput.books) {
-      const book = await prisma.book.upsert({
-        where: {
-          workId_slug: {
-            workId: work.id,
-            slug: bookInput.slug,
-          },
-        },
-        update: {
-          titleEn: bookInput.titleEn,
-          titleHe: bookInput.titleHe,
-        },
-        create: {
-          workId: work.id,
-          slug: bookInput.slug,
-          titleEn: bookInput.titleEn,
-          titleHe: bookInput.titleHe,
-        },
-      });
-
-      for (const chapterInput of bookInput.chapters) {
-        const chapter = await prisma.chapter.upsert({
-          where: {
-            bookId_number: {
-              bookId: book.id,
-              number: chapterInput.number,
-            },
-          },
-          update: {},
-          create: {
-            bookId: book.id,
-            number: chapterInput.number,
-          },
-        });
-
-        for (const pasukInput of chapterInput.pesukim) {
-          await upsertPasuk(chapter.id, pasukInput);
-        }
-      }
-    }
   }
 
   console.log("Seed complete: basic Torah text loaded.");

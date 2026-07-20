@@ -62,6 +62,30 @@ function sanitizeFileName(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function formatPasukRef(ref: string): string {
+  const match = ref.match(/^(.*)-(\d+)-(\d+)$/);
+  if (!match) {
+    return ref;
+  }
+
+  const [, bookSlug, chapter, pasuk] = match;
+  const smallWords = new Set(["and", "of", "the", "a", "an", "in", "on", "to"]);
+  const book = bookSlug
+    .split("-")
+    .filter(Boolean)
+    .map((part, index) => {
+      const lower = part.toLowerCase();
+      if (index > 0 && smallWords.has(lower)) {
+        return lower;
+      }
+
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+
+  return `${book} ${chapter}:${pasuk}`;
+}
+
 async function detectAudioDurationMs(file: File): Promise<number> {
   const objectUrl = URL.createObjectURL(file);
 
@@ -338,20 +362,36 @@ export function SubmitRecordingForm() {
         return;
       }
 
+      let loadedCount = 0;
+
       for (const pasuk of needsLoading) {
         if (cancelled) break;
         try {
-          await fetch("/api/text/ensure-loaded", {
+          const response = await fetch("/api/text/ensure-loaded", {
             method: "POST",
             body: JSON.stringify({ pasukId: pasuk.id }),
           });
+
+          if (!response.ok) {
+            continue;
+          }
+
+          const payload = (await response.json()) as {
+            pasuk?: {
+              hebrewText?: string | null;
+            };
+          };
+
+          if (payload.pasuk?.hebrewText?.trim()) {
+            loadedCount += 1;
+          }
         } catch (error) {
           console.error(`Failed to load text for ${pasuk.ref}:`, error);
         }
       }
 
       // Refresh the pesukim to reflect updated text
-      if (!cancelled && bookId) {
+      if (!cancelled && bookId && loadedCount > 0) {
         try {
           const response = await fetch(`/api/text/pesukim?bookId=${encodeURIComponent(bookId)}`);
           const data = await response.json();
@@ -798,7 +838,7 @@ export function SubmitRecordingForm() {
           <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleStartPasukChange(event.target.value)} value={startPasukId}>
             <option value="">Select start</option>
             {rangePesukim.map((pasuk) => (
-              <option key={pasuk.id} value={pasuk.id}>{pasuk.ref} (Ch. {pasuk.chapterNumber})</option>
+              <option key={pasuk.id} value={pasuk.id}>{formatPasukRef(pasuk.ref)} (Ch. {pasuk.chapterNumber})</option>
             ))}
           </select>
         </label>
@@ -808,7 +848,7 @@ export function SubmitRecordingForm() {
           <select className="mt-2 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || rangePesukim.length === 0} onChange={(event) => handleEndPasukChange(event.target.value)} value={endPasukId}>
             <option value="">Select end</option>
             {rangePesukim.map((pasuk) => (
-              <option key={pasuk.id} value={pasuk.id}>{pasuk.ref} (Ch. {pasuk.chapterNumber})</option>
+              <option key={pasuk.id} value={pasuk.id}>{formatPasukRef(pasuk.ref)} (Ch. {pasuk.chapterNumber})</option>
             ))}
           </select>
         </label>
@@ -820,7 +860,7 @@ export function SubmitRecordingForm() {
           <div className="space-y-3">
             {selectedPesukim.map((pasuk) => (
               <div key={pasuk.id} className="rounded-lg border border-orange-900/10 bg-orange-50/50 p-3">
-                <p className="text-xs font-semibold text-orange-900/60 mb-1">{pasuk.ref}</p>
+                <p className="text-xs font-semibold text-orange-900/60 mb-1">{formatPasukRef(pasuk.ref)}</p>
                 <p className="text-lg leading-relaxed text-right text-orange-950 font-hebrew">
                   {pasuk.hebrewText || "[Loading text...]"}
                 </p>
@@ -969,7 +1009,7 @@ export function SubmitRecordingForm() {
                 {boundaries.map((row, index) => (
                   <tr key={row.pasukId} className="border-t border-orange-100 text-sm">
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-orange-950">{row.ref}</div>
+                      <div className="font-semibold text-orange-950">{formatPasukRef(row.ref)}</div>
                       <div className="text-xs text-orange-900/70">Pasuk {row.pasukNumber}</div>
                     </td>
                     <td className="px-4 py-3">

@@ -2,10 +2,10 @@ import { prisma } from "@/lib/db/client";
 
 export async function GET() {
   const works = await prisma.work.findMany({
-    orderBy: { titleEn: "asc" },
+    orderBy: [{ order: "asc" }, { titleEn: "asc" }],
     include: {
       books: {
-        orderBy: { titleEn: "asc" },
+        orderBy: [{ order: "asc" }, { titleEn: "asc" }],
         include: {
           chapters: {
             orderBy: { number: "asc" },

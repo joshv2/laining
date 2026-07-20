@@ -18,7 +18,7 @@
   --color-ink-soft: var(--ink-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-hebrew: var(--font-hebrew);
+  --font-hebrew: var(--font-hebrew-pasuk);
 }
 
 body {
@@ -39,7 +39,7 @@ body {
 }
 
 .text-hebrew {
-  font-family: var(--font-hebrew), "Times New Roman", serif;
+  font-family: var(--font-hebrew-pasuk), var(--font-hebrew), "Times New Roman", serif;
 }
 
 .grain {
