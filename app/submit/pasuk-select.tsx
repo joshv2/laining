@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { formatPasukRef } from '@/lib/formatters/pasuk';
 
 type Pasuk = {
   id: string;
@@ -15,20 +16,6 @@ interface PasukSelectProps {
   endPasukId: string;
   handleEndPasukChange: (id: string) => void;
   loadingPesukim?: boolean;
-}
-
-function formatPasukId(id: string): string {
-  if (!id) return '';
-  const parts = id.split('-');
-  if (parts.length < 3) return id;
-
-  const pasukNum = parts.pop();
-  const chapterNum = parts.pop();
-  const bookName = parts
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-
-  return `${bookName} ${chapterNum}:${pasukNum}`;
 }
 
 export default function PasukSelect({
@@ -76,7 +63,7 @@ export default function PasukSelect({
         className="w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2 text-left flex justify-between items-center"
       >
         <span>
-          {selectedPasuk ? formatPasukId(selectedPasuk.ref) : 'Select Pasuk...'}
+          {selectedPasuk ? formatPasukRef(selectedPasuk.ref) : 'Select Pasuk...'}
         </span>
         <span className="text-xs text-gray-400">▼</span>
       </button>
@@ -104,7 +91,7 @@ export default function PasukSelect({
               }}
               className="cursor-pointer px-3 py-2 hover:bg-orange-50 text-sm"
             >
-              {formatPasukId(p.ref)}
+              {formatPasukRef(p.ref)}
             </li>
           ))}
 
