@@ -86,8 +86,8 @@ export default async function RootLayout({
       lang="en"
       className={`${rubik.variable} ${geistMono.variable} ${notoSerifHebrew.variable} ${shlomoStam.variable} h-full antialiased`}
     >
-      <Analytics />
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col suppressHydrationWarning">
+        <Analytics />
         {gaMeasurementId ? (
           <>
             <Script async src={`https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`} strategy="afterInteractive" />

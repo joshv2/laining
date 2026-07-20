@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import PasukSelect from "@/app/submit/pasuk-select";
 
 type ChapterSummary = {
   id: string;
@@ -767,12 +768,11 @@ export function LearnerWorkbench() {
 
           <label className="text-sm font-semibold text-orange-950">
             Pasuk
-            <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" disabled={loadingPesukim || chapterPesukim.length === 0} onChange={(event) => handlePasukChange(event.target.value)} value={pasukId}>
-              <option value="">Select pasuk</option>
-              {chapterPesukim.map((pasuk) => (
-                <option key={pasuk.id} value={pasuk.id}>{pasuk.ref}</option>
-              ))}
-            </select>
+            <PasukSelect rangePesukim={chapterPesukim}
+                        endPasukId={pasukId}
+                        handleEndPasukChange={handlePasukChange}
+                        loadingPesukim={loadingPesukim}
+                      />
           </label>
         </div>
 
