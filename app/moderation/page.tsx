@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { formatPasukRef } from "@/lib/formatters/pasuk";
 import { prisma } from "@/lib/db/client";
 import { isModeratorOrAbove } from "@/lib/auth/roles";
+import { runAlignmentForRecording } from "@/app/api/recordings/[id]/alignment/route";
 import { ModerationAudioReviewer } from "./moderation-audio-reviewer";
 
 async function reviewRecording(formData: FormData, nextStatus: RecordingStatus) {
@@ -44,6 +45,14 @@ async function reviewRecording(formData: FormData, nextStatus: RecordingStatus) 
       },
     });
   });
+
+  if (nextStatus === RecordingStatus.APPROVED) {
+    try {
+      await runAlignmentForRecording(recordingId);
+    } catch (error) {
+      console.error("Failed to run alignment after moderation approval:", error);
+    }
+  }
 
   revalidatePath("/moderation");
   revalidatePath("/");

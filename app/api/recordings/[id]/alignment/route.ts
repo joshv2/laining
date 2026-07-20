@@ -314,8 +314,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return Response.json({ error: "Expected multipart field 'file'" }, { status: 400 });
   }
 
-  const normalizedType = normalizeMimeType(file.type || "");
-
   try {
     const result = await runAlignmentForRecording(recording.id);
     return Response.json(
