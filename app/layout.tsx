@@ -6,6 +6,7 @@ import localFont from "next/font/local";
 import { Geist_Mono, Noto_Serif_Hebrew, Rubik } from "next/font/google";
 
 import { SignOutButton } from "@/app/signout-button";
+import { Providers } from "@/app/providers";
 import { auth } from "@/lib/auth";
 import { isModeratorOrAbove, isSuperuser, isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
@@ -62,9 +63,12 @@ export default async function RootLayout({
 }>) {
   const session = await auth();
   const role = (session?.user?.role ?? Role.USER) as Role;
+  const onboarding = session?.user?.status === "onboarding";
 
   const assignmentCount = session?.user
-    ? await prisma.practiceAssignment.count({
+    ? onboarding
+      ? 0
+      : await prisma.practiceAssignment.count({
         where: {
           group: {
             enrollments: {
@@ -79,7 +83,7 @@ export default async function RootLayout({
 
   const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim();
   const unreadSuperuserNotifications =
-    session?.user && isSuperuser(role) ? await countUnreadSuperuserNotifications() : 0;
+    session?.user && !onboarding && isSuperuser(role) ? await countUnreadSuperuserNotifications() : 0;
 
   return (
     <html
@@ -87,95 +91,103 @@ export default async function RootLayout({
       className={`${rubik.variable} ${geistMono.variable} ${notoSerifHebrew.variable} ${shlomoStam.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col suppressHydrationWarning">
-        <Analytics />
-        {gaMeasurementId ? (
-          <>
-            <Script async src={`https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`} strategy="afterInteractive" />
-            <Script id="google-analytics" strategy="afterInteractive">
-              {`window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', '${gaMeasurementId}');`}
-            </Script>
-          </>
-        ) : null}
+        <Providers session={session}>
+          <Analytics />
+          {gaMeasurementId ? (
+            <>
+              <Script async src={`https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`} strategy="afterInteractive" />
+              <Script id="google-analytics" strategy="afterInteractive">
+                {`window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', '${gaMeasurementId}');`}
+              </Script>
+            </>
+          ) : null}
 
-        <header className="sticky top-0 z-50 border-b border-orange-900/15 bg-white/85 backdrop-blur">
-          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3 md:px-12">
-            <div className="flex items-center gap-3">
-              <Link className="text-sm font-bold uppercase tracking-[0.14em] text-orange-950" href="/">
-                Laining Collaborative
-              </Link>
-              <nav className="flex flex-wrap items-center gap-2 text-xs font-semibold text-orange-900 md:text-sm">
-                <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/learn">
-                  Learn
+          <header className="sticky top-0 z-50 border-b border-orange-900/15 bg-white/85 backdrop-blur">
+            <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3 md:px-12">
+              <div className="flex items-center gap-3">
+                <Link className="text-sm font-bold uppercase tracking-[0.14em] text-orange-950" href="/">
+                  Laining Collaborative
                 </Link>
-                <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/submit">
-                  Submit
+                <nav className="flex flex-wrap items-center gap-2 text-xs font-semibold text-orange-900 md:text-sm">
+                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/learn">
+                    Learn
+                  </Link>
+                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/submit">
+                    Submit
+                  </Link>
+                  {isTeacher(role) ? (
+                    <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/teacher">
+                      Teacher
+                    </Link>
+                  ) : null}
+                  {isModeratorOrAbove(role) ? (
+                    <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/moderation">
+                      Moderation
+                    </Link>
+                  ) : null}
+                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/contact">
+                    Contact
+                  </Link>
+                  {isSuperuser(role) ? (
+                    <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/superuser/notifications">
+                      Superuser Inbox {unreadSuperuserNotifications > 0 ? `(${unreadSuperuserNotifications})` : ""}
+                    </Link>
+                  ) : null}
+                </nav>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {session?.user ? (
+                  <>
+                    <div className="flex h-8 items-center gap-2 rounded-full border border-orange-900/20 bg-white px-3">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-200 text-[10px] font-bold text-orange-900">
+                        {initialsForUser(session.user.name, session.user.email)}
+                      </span>
+                      <span className="max-w-40 truncate text-xs font-semibold leading-none text-orange-950">
+                        {session.user.name ?? session.user.email ?? "User"}
+                      </span>
+                    </div>
+
+                    {onboarding ? (
+                      <Link className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 md:text-sm" href="/onboarding">
+                        Finish onboarding
+                      </Link>
+                    ) : (
+                      <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 text-xs font-semibold hover:bg-orange-100 md:text-sm" href="/learn">
+                        Assignments {assignmentCount > 0 ? `(${assignmentCount})` : ""}
+                      </Link>
+                    )}
+
+                    <SignOutButton />
+                  </>
+                ) : (
+                  <Link className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]" href="/signin">
+                    Sign In
+                  </Link>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <main className="flex-1">{children}</main>
+
+          <footer className="site-footer border-t border-orange-900/15">
+            <div className="mx-auto w-full max-w-6xl px-6 py-6 text-xs text-orange-950/85 md:px-12">
+              <p>Copyright {new Date().getFullYear()} Laining Collaborative.</p>
+              <p>Website code is licensed under MIT. Uploaded recordings remain property of the site.</p>
+              <p className="mt-1">
+                <Link className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900" href="/terms">
+                  Terms of Use
                 </Link>
-                {isTeacher(role) ? (
-                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/teacher">
-                    Teacher
-                  </Link>
-                ) : null}
-                {isModeratorOrAbove(role) ? (
-                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/moderation">
-                    Moderation
-                  </Link>
-                ) : null}
-                <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/contact">
+              </p>
+              <p className="mt-1">
+                <Link className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900" href="/contact">
                   Contact
                 </Link>
-                {isSuperuser(role) ? (
-                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/superuser/notifications">
-                    Superuser Inbox {unreadSuperuserNotifications > 0 ? `(${unreadSuperuserNotifications})` : ""}
-                  </Link>
-                ) : null}
-              </nav>
+              </p>
             </div>
-
-            <div className="flex items-center gap-2">
-              {session?.user ? (
-                <>
-                  <div className="flex h-8 items-center gap-2 rounded-full border border-orange-900/20 bg-white px-3">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-200 text-[10px] font-bold text-orange-900">
-                      {initialsForUser(session.user.name, session.user.email)}
-                    </span>
-                    <span className="max-w-40 truncate text-xs font-semibold leading-none text-orange-950">
-                      {session.user.name ?? session.user.email ?? "User"}
-                    </span>
-                  </div>
-
-                  <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 text-xs font-semibold hover:bg-orange-100 md:text-sm" href="/learn">
-                    Assignments {assignmentCount > 0 ? `(${assignmentCount})` : ""}
-                  </Link>
-
-                  <SignOutButton />
-                </>
-              ) : (
-                <Link className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]" href="/signin">
-                  Sign In
-                </Link>
-              )}
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1">{children}</main>
-
-        <footer className="site-footer border-t border-orange-900/15">
-          <div className="mx-auto w-full max-w-6xl px-6 py-6 text-xs text-orange-950/85 md:px-12">
-            <p>Copyright {new Date().getFullYear()} Laining Collaborative.</p>
-            <p>Website code is licensed under MIT. Uploaded recordings remain property of the site.</p>
-            <p className="mt-1">
-              <Link className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900" href="/terms">
-                Terms of Use
-              </Link>
-            </p>
-            <p className="mt-1">
-              <Link className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900" href="/contact">
-                Contact
-              </Link>
-            </p>
-          </div>
-        </footer>
+          </footer>
+        </Providers>
       </body>
     </html>
   );
