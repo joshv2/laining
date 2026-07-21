@@ -1,16 +1,19 @@
-import { RecordingStatus, Role } from "@prisma/client";
+import { RecordingStatus, Role, TokenizationEventType } from "@prisma/client";
 import { NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { runAlignmentForRecording } from "@/app/api/recordings/[id]/alignment/route";
 import { isModeratorOrAbove } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 import { createRecordingSchema, normalizeNussach } from "@/lib/services/recording-ingestion";
+import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
   const searchParams = request.nextUrl.searchParams;
   const pasukId = searchParams.get("pasukId") || undefined;
   const role = (session?.user?.role ?? Role.USER) as Role;
+  const canUseAssignedMode = role === Role.USER || role === Role.SUPERUSER;
 
   const canSeeUnapproved = session?.user?.role ? isModeratorOrAbove(session.user.role) : false;
   const statusFilter = canSeeUnapproved ? undefined : RecordingStatus.APPROVED;
@@ -18,7 +21,7 @@ export async function GET(request: NextRequest) {
   let assignedRecordingIds: string[] = [];
   let accessMode: "assigned-only" | "public-catalog" = "public-catalog";
 
-  if (pasukId && session?.user?.id && role === Role.USER) {
+  if (pasukId && session?.user?.id && canUseAssignedMode) {
     const assignedRecordings = await prisma.practiceAssignment.findMany({
       where: {
         group: {
@@ -62,10 +65,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const isAssignedModeForStudent = role === Role.USER && accessMode === "assigned-only";
+  const isAssignedModeForAssignedUser = canUseAssignedMode && accessMode === "assigned-only";
   const where = pasukId
     ? {
-        ...(isAssignedModeForStudent ? {} : { status: statusFilter }),
+        ...(isAssignedModeForAssignedUser ? {} : { status: statusFilter }),
         ...(assignedRecordingIds.length > 0 ? { id: { in: assignedRecordingIds } } : {}),
         OR: [
           { primaryPasukId: pasukId },
@@ -150,6 +153,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
   }
 
+  const isTeacherSubmission = session.user.role === Role.TEACHER;
   const normalized = normalizeNussach(parsed.data);
   const normalizedTitle = parsed.data.title?.trim() || undefined;
   const recording = await prisma.recording.create({
@@ -163,5 +167,28 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return Response.json({ recording }, { status: 201 });
+  if (isTeacherSubmission) {
+    await triggerTokenizationSafely({
+      eventType: TokenizationEventType.MODERATION_APPROVED,
+      recipientUserId: recording.userId,
+      sourceType: "recording",
+      sourceId: recording.id,
+      metadata: {
+        reason: "teacher-submit",
+      },
+    });
+
+    void runAlignmentForRecording(recording.id).catch((error) => {
+      console.error("Failed to run alignment after teacher submission:", error);
+    });
+  }
+
+  return Response.json(
+    {
+      recording,
+      tokenizationQueued: isTeacherSubmission,
+      alignmentQueued: isTeacherSubmission,
+    },
+    { status: 201 },
+  );
 }
