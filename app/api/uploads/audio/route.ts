@@ -2,6 +2,7 @@ import { get } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 
 import { auth } from "@/lib/auth";
+import { consumeRateLimit, getRequestClientFingerprint } from "@/lib/services/abuse";
 
 const ALLOWED_AUDIO_TYPES = new Set([
   "audio/mpeg",
@@ -86,13 +87,22 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const rateLimitKey = `${session.user.email ?? session.user.id}:${getRequestClientFingerprint(request, session.user.id)}`;
+  const rateLimit = consumeRateLimit(rateLimitKey, 12, 10 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return Response.json({ error: "Upload rate limit exceeded." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
+  }
+
   try {
     const body = (await request.json()) as HandleUploadBody;
 
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname, _clientPayload, _multipart) => {
+      onBeforeGenerateToken: async (pathname, clientPayload, multipart) => {
+        void clientPayload;
+        void multipart;
+
         if (!pathname.startsWith("recordings/")) {
           throw new Error("Invalid upload path.");
         }

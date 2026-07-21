@@ -10,7 +10,7 @@ type SignInPageProps = {
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = searchParams ? await searchParams : undefined;
-  const callbackUrl = params?.callbackUrl && params.callbackUrl.startsWith("/") ? params.callbackUrl : "/";
+  const callbackUrl = params?.callbackUrl && params.callbackUrl.startsWith("/") ? params.callbackUrl : "/onboarding";
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-6 py-16">
@@ -18,7 +18,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-800">Laining Collaborative</p>
         <h1 className="mt-4 text-3xl font-bold text-orange-950">Sign in with Google</h1>
         <p className="mt-3 text-sm leading-6 text-orange-900/80">
-          Accounts are role-based: learners, moderators, and superusers. Public recordings are approved by moderators before publishing.
+          Google sign-in lands in a lightweight onboarding step first. Public users can continue without an invite code, and class access still uses invite links.
         </p>
 
         <GoogleSignInButton callbackUrl={callbackUrl} />

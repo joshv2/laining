@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { runAlignmentForRecording } from "@/app/api/recordings/[id]/alignment/route";
 import { isModeratorOrAbove } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
+import { consumeRateLimit, getRequestClientFingerprint } from "@/lib/services/abuse";
 import { createRecordingSchema, normalizeNussach } from "@/lib/services/recording-ingestion";
 import { triggerTokenizationSafely } from "@/lib/services/tokenization";
 
@@ -146,6 +147,12 @@ export async function POST(request: NextRequest) {
 
   if (!session?.user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimitKey = `${session.user.email ?? session.user.id}:${getRequestClientFingerprint(request, session.user.id)}`;
+  const rateLimit = consumeRateLimit(rateLimitKey, 6, 60 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return Response.json({ error: "Submission rate limit exceeded." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
   }
 
   const parsed = createRecordingSchema.safeParse(await request.json());
