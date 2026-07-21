@@ -745,7 +745,11 @@ export function SubmitRecordingForm() {
         throw new Error(createError.error ?? "Failed to create recording");
       }
 
-      const created = await createResponse.json();
+      const created = (await createResponse.json()) as {
+        recording: { id: string };
+        tokenizationQueued?: boolean;
+        alignmentQueued?: boolean;
+      };
 
       const boundariesResponse = await fetch(`/api/recordings/${created.recording.id}/boundaries`, {
         method: "PUT",
@@ -760,7 +764,13 @@ export function SubmitRecordingForm() {
         throw new Error(boundaryError.error ?? "Failed to save boundaries");
       }
 
-      setSuccessMessage("Recording submitted successfully. It is now pending moderator approval.");
+      if (created.tokenizationQueued || created.alignmentQueued) {
+        setSuccessMessage(
+          "Recording submitted successfully. Teacher processing started: tokenization and alignment were queued right away.",
+        );
+      } else {
+        setSuccessMessage("Recording submitted successfully. It is now pending moderator approval.");
+      }
       setAudioFile(null);
       setRecordingTitle("");
       setDurationMs(0);

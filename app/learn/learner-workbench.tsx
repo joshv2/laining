@@ -210,6 +210,8 @@ export function LearnerWorkbench() {
   const [loadingRecordings, setLoadingRecordings] = useState(false);
   const [loadingAssignments, setLoadingAssignments] = useState(false);
   const [recordingAccessMode, setRecordingAccessMode] = useState<RecordingAccessMode>("public-catalog");
+  const [recordingsReloadKey, setRecordingsReloadKey] = useState(0);
+  const [preferredRecordingId, setPreferredRecordingId] = useState<string | null>(null);
 
   const [workId, setWorkId] = useState("");
   const [bookId, setBookId] = useState("");
@@ -376,7 +378,10 @@ export function LearnerWorkbench() {
           const nextRecordings = (data.recordings ?? []) as RecordingItem[];
           const nextAccessMode =
             data.accessMode === "assigned-only" ? ("assigned-only" as const) : ("public-catalog" as const);
-          const nextSelectedRecording = nextRecordings[0] ?? null;
+          const preferredRecording = preferredRecordingId
+            ? nextRecordings.find((item) => item.id === preferredRecordingId) ?? null
+            : null;
+          const nextSelectedRecording = preferredRecording ?? nextRecordings[0] ?? null;
           setRecordings(nextRecordings);
           setRecordingAccessMode(nextAccessMode);
           setSelectedRecordingId(nextSelectedRecording?.id ?? "");
@@ -384,6 +389,7 @@ export function LearnerWorkbench() {
           setCurrentMs(0);
           segmentStopRef.current = null;
           setSegmentStopMs(null);
+          setPreferredRecordingId(null);
         }
       } finally {
         if (!cancelled) {
@@ -397,7 +403,7 @@ export function LearnerWorkbench() {
     return () => {
       cancelled = true;
     };
-  }, [pasukId]);
+  }, [pasukId, preferredRecordingId, recordingsReloadKey]);
 
   useEffect(() => {
     if (!selectedRecording) {
@@ -611,6 +617,7 @@ export function LearnerWorkbench() {
     setRecordings([]);
     setRecordingAccessMode("public-catalog");
     setSelectedRecordingId("");
+    setPreferredRecordingId(null);
     setFocusedBoundaryIndex(0);
     setCurrentMs(0);
     setSegmentStopMs(null);
@@ -711,6 +718,8 @@ export function LearnerWorkbench() {
     setPasukId(assignment.recording.primaryPasuk.id);
     setRecordings([]);
     setSelectedRecordingId("");
+    setPreferredRecordingId(assignment.recording.id);
+    setRecordingsReloadKey((value) => value + 1);
     setCurrentMs(0);
     setFocusedBoundaryIndex(0);
     segmentStopRef.current = null;
@@ -848,15 +857,6 @@ export function LearnerWorkbench() {
                         {recording.title ? `${recording.title} - ` : ""}
                         {recording.nussach}
                         {recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
-                      </span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${
-                        recording.matchType === "primary"
-                          ? "bg-lime-100 text-lime-900"
-                          : recording.matchType === "boundary"
-                            ? "bg-amber-100 text-amber-900"
-                            : "bg-zinc-100 text-zinc-800"
-                      }`}>
-                        {recording.matchType}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-orange-900/70">
