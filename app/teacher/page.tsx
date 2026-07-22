@@ -1,6 +1,5 @@
-import { revalidatePath } from "next/cache";
+import { Role } from "@prisma/client";
 import { redirect } from "next/navigation";
-import { RecordingStatus, Role } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { isTeacher } from "@/lib/auth/roles";
@@ -9,34 +8,10 @@ import { formatPasukRef } from "@/lib/formatters/pasuk";
 
 import { ActivateTeacherButton } from "./activate-teacher-button";
 import { TeacherDashboardClient } from "./teacher-dashboard-client";
+import { TeacherNav } from "./teacher-nav";
 
-async function createClassGroup(formData: FormData) {
-  "use server";
-
-  const session = await auth();
-  const role = (session?.user?.role ?? Role.USER) as Role;
-
-  if (!session?.user) {
-    redirect("/signin?callbackUrl=/teacher");
-  }
-
-  if (!isTeacher(role)) {
-    redirect("/teacher");
-  }
-
-  const name = String(formData.get("name") ?? "").trim();
-  if (name.length < 2 || name.length > 80) {
-    return;
-  }
-
-  await prisma.classGroup.create({
-    data: {
-      name,
-      teacherId: session.user.id,
-    },
-  });
-
-  revalidatePath("/teacher");
+function isDirectClassName(name: string): boolean {
+  return name.startsWith("Direct 1-on-1:");
 }
 
 export default async function TeacherPage() {
@@ -76,57 +51,65 @@ export default async function TeacherPage() {
 
   const [
     groupsRaw,
-    invitesRaw,
-    assignmentsRaw,
-    approvedRecordingsRaw,
-    enrollmentsRaw,
     directLinksRaw,
+    assignmentsRaw,
     teacherPlaybackEventsRaw,
     teacherAccessSubscriptionRaw,
     pendingInvites,
     totalAssignments,
+    enrollmentsRaw,
   ] = await Promise.all([
     prisma.classGroup.findMany({
       where: { teacherId: session.user.id },
-      orderBy: { createdAt: "desc" },
       include: {
-        _count: {
-          select: {
-            enrollments: true,
-            assignments: true,
-            invites: true,
+        enrollments: {
+          include: {
+            student: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
         },
       },
-      take: 50,
+      orderBy: { createdAt: "desc" },
+      take: 180,
     }),
-    prisma.teacherInvite.findMany({
-      where: { teacherId: session.user.id },
-      orderBy: { createdAt: "desc" },
+    prisma.teacherStudentLink.findMany({
+      where: {
+        teacherId: session.user.id,
+      },
       include: {
-        group: {
+        student: {
           select: {
             id: true,
             name: true,
-          },
-        },
-        acceptedByUser: {
-          select: {
-            id: true,
-            name: true,
+            email: true,
           },
         },
       },
-      take: 100,
+      orderBy: { createdAt: "desc" },
+      take: 300,
     }),
     prisma.practiceAssignment.findMany({
       where: { assignedByTeacherId: session.user.id },
       orderBy: { createdAt: "desc" },
       include: {
         group: {
-          select: {
-            id: true,
-            name: true,
+          include: {
+            enrollments: {
+              include: {
+                student: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+              },
+            },
           },
         },
         recording: {
@@ -142,79 +125,8 @@ export default async function TeacherPage() {
             },
           },
         },
-        _count: {
-          select: {
-            playbackEvents: true,
-          },
-        },
-      },
-      take: 120,
-    }),
-    prisma.recording.findMany({
-      where: {
-        OR: [{ status: RecordingStatus.APPROVED }, { userId: session.user.id }],
-      },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        nussach: true,
-        nussachCustom: true,
-        durationMs: true,
-        primaryPasuk: {
-          select: {
-            ref: true,
-          },
-        },
       },
       take: 200,
-    }),
-    prisma.classEnrollment.findMany({
-      where: {
-        group: {
-          teacherId: session.user.id,
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        group: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        student: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-      take: 300,
-    }),
-    prisma.teacherStudentLink.findMany({
-      where: {
-        teacherId: session.user.id,
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        student: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        invite: {
-          select: {
-            id: true,
-            email: true,
-            acceptedAt: true,
-          },
-        },
-      },
-      take: 300,
     }),
     prisma.playbackEvent.findMany({
       where: {
@@ -228,7 +140,7 @@ export default async function TeacherPage() {
         studentId: true,
         occurredAt: true,
       },
-      take: 1000,
+      take: 2000,
     }),
     prisma.teacherAccessSubscription?.findUnique({
       where: {
@@ -256,6 +168,17 @@ export default async function TeacherPage() {
       where: {
         assignedByTeacherId: session.user.id,
       },
+    }),
+    prisma.classEnrollment.findMany({
+      where: {
+        group: {
+          teacherId: session.user.id,
+        },
+      },
+      select: {
+        studentId: true,
+      },
+      take: 2000,
     }),
   ]);
 
@@ -288,65 +211,25 @@ export default async function TeacherPage() {
             },
           },
         },
-        take: 4000,
+        take: 6000,
       })
     : [];
 
   const uniqueStudentIds = new Set<string>();
-  for (const enrollment of enrollmentsRaw) {
-    uniqueStudentIds.add(enrollment.student.id);
+  for (const link of directLinksRaw) {
+    uniqueStudentIds.add(link.student.id);
   }
-  for (const directLink of directLinksRaw) {
-    uniqueStudentIds.add(directLink.student.id);
+  for (const enrollment of enrollmentsRaw) {
+    uniqueStudentIds.add(enrollment.studentId);
   }
 
   const latestTeacherActivity = new Map<string, Date>();
   for (const event of teacherPlaybackEventsRaw) {
-    const existingLatest = latestTeacherActivity.get(event.studentId);
-    if (!existingLatest || existingLatest.getTime() < event.occurredAt.getTime()) {
+    if (!latestTeacherActivity.has(event.studentId)) {
       latestTeacherActivity.set(event.studentId, event.occurredAt);
     }
   }
 
-  const groups = groupsRaw.map((group) => ({
-    id: group.id,
-    name: group.name,
-    counts: {
-      students: group._count.enrollments,
-      invites: group._count.invites,
-      assignments: group._count.assignments,
-    },
-  }));
-
-  const invites = invitesRaw.map((invite) => ({
-    id: invite.id,
-    token: invite.token,
-    email: invite.email,
-    createdAt: invite.createdAt.toISOString(),
-    expiresAt: invite.expiresAt.toISOString(),
-    acceptedAt: invite.acceptedAt ? invite.acceptedAt.toISOString() : null,
-    kind: (invite.groupId ? "class" : "direct") as "class" | "direct",
-    groupName: invite.group?.name ?? null,
-    acceptedByName: invite.acceptedByUser?.name ?? null,
-  }));
-
-  const assignments = assignmentsRaw.map((assignment) => ({
-    id: assignment.id,
-    groupId: assignment.group.id,
-    createdAt: assignment.createdAt.toISOString(),
-    dueAt: assignment.dueAt ? assignment.dueAt.toISOString() : null,
-    instructions: assignment.instructions,
-    groupName: assignment.group.name,
-    playbackEventCount: assignment._count.playbackEvents,
-    recording: {
-      title: assignment.recording.title,
-      nussach: assignment.recording.nussach,
-      nussachCustom: assignment.recording.nussachCustom,
-      primaryPasukRef: formatPasukRef(assignment.recording.primaryPasuk.ref),
-    },
-  }));
-
-  const latestStudentActivity = new Map<string, Date>();
   const assignmentActivityBuckets = new Map<
     string,
     Map<
@@ -366,11 +249,6 @@ export default async function TeacherPage() {
   for (const event of assignmentEventsRaw) {
     if (!event.assignmentId) {
       continue;
-    }
-
-    const existingLatest = latestStudentActivity.get(event.studentId);
-    if (!existingLatest || existingLatest.getTime() < event.occurredAt.getTime()) {
-      latestStudentActivity.set(event.studentId, event.occurredAt);
     }
 
     const assignmentBucket = assignmentActivityBuckets.get(event.assignmentId) ?? new Map();
@@ -402,75 +280,125 @@ export default async function TeacherPage() {
     assignmentActivityBuckets.set(event.assignmentId, assignmentBucket);
   }
 
-  const assignmentActivity = assignments.map((assignment) => {
-    const rows = Array.from(assignmentActivityBuckets.get(assignment.id)?.values() ?? []).map((row) => {
+  const directAssignments: {
+    assignmentId: string;
+    classId: string;
+    studentId: string;
+    studentName: string | null;
+    studentEmail: string | null;
+    className: string;
+    recordingLabel: string;
+    dueAt: string | null;
+    instructions: string | null;
+    totalEvents: number;
+    replayEvents: number;
+    lastOccurredAt: string | null;
+    topReplayPasukRef: string | null;
+    topReplayCount: number;
+    isOld: boolean;
+  }[] = [];
+
+  const classAssignments: {
+    assignmentId: string;
+    classId: string;
+    className: string;
+    recordingLabel: string;
+    dueAt: string | null;
+    instructions: string | null;
+    totalStudents: number;
+    studentsWithActivity: number;
+    totalEvents: number;
+    replayEvents: number;
+    lastOccurredAt: string | null;
+    isOld: boolean;
+  }[] = [];
+
+  for (const assignment of assignmentsRaw) {
+    const dueAtIso = assignment.dueAt ? assignment.dueAt.toISOString() : null;
+    const isOld = Boolean(assignment.dueAt && assignment.dueAt.getTime() < now.getTime());
+    const recordingLabel = `${assignment.recording.title ? `${assignment.recording.title} - ` : ""}${formatPasukRef(assignment.recording.primaryPasuk.ref)} - ${assignment.recording.nussach}${assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}`;
+
+    const studentActivityRows = Array.from(assignmentActivityBuckets.get(assignment.id)?.values() ?? []);
+
+    if (isDirectClassName(assignment.group.name)) {
+      const enrolledStudent = assignment.group.enrollments[0]?.student;
+      const directStudent = enrolledStudent ?? directLinksRaw.find((link) => link.student.id === assignment.group.name.replace("Direct 1-on-1: ", ""))?.student ?? null;
+      const activityForStudent = directStudent ? studentActivityRows.find((row) => row.studentId === directStudent.id) : studentActivityRows[0] ?? null;
+
       let topReplayPasukRef: string | null = null;
       let topReplayCount = 0;
 
-      for (const [pasukRef, count] of row.replayByPasuk) {
-        if (count > topReplayCount) {
-          topReplayCount = count;
-          topReplayPasukRef = formatPasukRef(pasukRef);
+      if (activityForStudent) {
+        for (const [pasukRef, count] of activityForStudent.replayByPasuk.entries()) {
+          if (count > topReplayCount) {
+            topReplayCount = count;
+            topReplayPasukRef = formatPasukRef(pasukRef);
+          }
         }
       }
 
-      return {
-        studentId: row.studentId,
-        studentName: row.studentName,
-        studentEmail: row.studentEmail,
-        totalEvents: row.totalEvents,
-        replayEvents: row.replayEvents,
-        lastOccurredAt: row.lastOccurredAt.toISOString(),
+      directAssignments.push({
+        assignmentId: assignment.id,
+        classId: assignment.group.id,
+        studentId: directStudent?.id ?? activityForStudent?.studentId ?? "unknown",
+        studentName: directStudent?.name ?? activityForStudent?.studentName ?? null,
+        studentEmail: directStudent?.email ?? activityForStudent?.studentEmail ?? null,
+        className: assignment.group.name,
+        recordingLabel,
+        dueAt: dueAtIso,
+        instructions: assignment.instructions,
+        totalEvents: activityForStudent?.totalEvents ?? 0,
+        replayEvents: activityForStudent?.replayEvents ?? 0,
+        lastOccurredAt: activityForStudent?.lastOccurredAt.toISOString() ?? null,
         topReplayPasukRef,
         topReplayCount,
-      };
-    });
+        isOld,
+      });
 
-    rows.sort((a, b) => new Date(b.lastOccurredAt).getTime() - new Date(a.lastOccurredAt).getTime());
-    return {
+      continue;
+    }
+
+    let totalEvents = 0;
+    let replayEvents = 0;
+    let lastOccurredAt: Date | null = null;
+    const studentsWithActivity = new Set<string>();
+
+    for (const row of studentActivityRows) {
+      totalEvents += row.totalEvents;
+      replayEvents += row.replayEvents;
+      studentsWithActivity.add(row.studentId);
+      if (!lastOccurredAt || row.lastOccurredAt.getTime() > lastOccurredAt.getTime()) {
+        lastOccurredAt = row.lastOccurredAt;
+      }
+    }
+
+    classAssignments.push({
       assignmentId: assignment.id,
-      rows,
-    };
-  });
+      classId: assignment.group.id,
+      className: assignment.group.name,
+      recordingLabel,
+      dueAt: dueAtIso,
+      instructions: assignment.instructions,
+      totalStudents: assignment.group.enrollments.length,
+      studentsWithActivity: studentsWithActivity.size,
+      totalEvents,
+      replayEvents,
+      lastOccurredAt: lastOccurredAt?.toISOString() ?? null,
+      isOld,
+    });
+  }
 
-  const roster = enrollmentsRaw.map((enrollment) => ({
-    id: enrollment.id,
-    groupId: enrollment.group.id,
-    groupName: enrollment.group.name,
-    studentId: enrollment.student.id,
-    studentName: enrollment.student.name,
-    studentEmail: enrollment.student.email,
-    joinedAt: enrollment.createdAt.toISOString(),
-    lastActivityAt: latestStudentActivity.get(enrollment.student.id)?.toISOString() ?? null,
-  }));
+  const hasNamedClasses = groupsRaw.some((group) => !isDirectClassName(group.name));
 
-  const directStudents = directLinksRaw.map((link) => ({
-    id: link.id,
-    studentId: link.student.id,
-    studentName: link.student.name,
-    studentEmail: link.student.email,
-    acceptedAt: link.invite?.acceptedAt ? link.invite.acceptedAt.toISOString() : null,
-    inviteEmail: link.invite?.email ?? null,
-    lastActivityAt: latestTeacherActivity.get(link.student.id)?.toISOString() ?? null,
-  }));
+  const teacherAccess = {
+    status: teacherAccessSubscriptionRaw?.status ?? "ACTIVE",
+    source: teacherAccessSubscriptionRaw?.source ?? "FREE",
+    priceCents: teacherAccessSubscriptionRaw?.priceCents ?? 0,
+    currencyCode: teacherAccessSubscriptionRaw?.currencyCode ?? "USD",
+    activatedAt: teacherAccessSubscriptionRaw?.activatedAt.toISOString() ?? null,
+    deactivatedAt: teacherAccessSubscriptionRaw?.deactivatedAt?.toISOString() ?? null,
+  };
 
-  const approvedRecordings = approvedRecordingsRaw.map((recording) => ({
-    id: recording.id,
-    title: recording.title,
-    nussach: recording.nussach,
-    nussachCustom: recording.nussachCustom,
-    durationMs: recording.durationMs,
-    primaryPasukRef: formatPasukRef(recording.primaryPasuk.ref),
-  }));
-
-        const teacherAccess = {
-          status: teacherAccessSubscriptionRaw?.status ?? "ACTIVE",
-          source: teacherAccessSubscriptionRaw?.source ?? "FREE",
-          priceCents: teacherAccessSubscriptionRaw?.priceCents ?? 0,
-          currencyCode: teacherAccessSubscriptionRaw?.currencyCode ?? "USD",
-          activatedAt: teacherAccessSubscriptionRaw?.activatedAt.toISOString() ?? null,
-          deactivatedAt: teacherAccessSubscriptionRaw?.deactivatedAt?.toISOString() ?? null,
-        };
   const analytics = {
     totalStudents: uniqueStudentIds.size,
     pendingInvites,
@@ -481,50 +409,19 @@ export default async function TeacherPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10 md:px-12">
-      <header className="mb-8">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--ink-soft)]">Teacher Mode</p>
-          <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Teacher Dashboard</h1>
-          <p className="mt-2 text-sm text-orange-900/80">
-            Direct 1-on-1 tutoring is the primary flow. Classes are optional when you want to group multiple students.
-          </p>
+      <header className="mb-6">
+        <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Teacher Dashboard</h1>
+        <div className="mt-4">
+          <TeacherNav current="dashboard" />
         </div>
       </header>
 
-      <details className="mb-6 rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <summary className="cursor-pointer text-lg font-bold text-orange-950">Optional class grouping</summary>
-        <p className="mt-2 text-sm text-orange-900/80">
-          Skip this if you tutor one student at a time. Create a class only when you want a shared roster for multiple students.
-        </p>
-        <form action={createClassGroup} className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="w-full max-w-md text-sm font-semibold text-orange-950">
-            Class Name
-            <input
-              className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2"
-              maxLength={80}
-              minLength={2}
-              name="name"
-              placeholder="Sunday Bnei Mitzvah Group"
-              required
-              type="text"
-            />
-          </label>
-          <button className="rounded-full border border-orange-900/25 bg-white px-4 py-2 text-sm font-semibold text-orange-950 hover:bg-orange-100" type="submit">
-            Create Class
-          </button>
-        </form>
-      </details>
-
       <TeacherDashboardClient
         analytics={analytics}
-              teacherAccess={teacherAccess}
-        approvedRecordings={approvedRecordings}
-        assignmentActivity={assignmentActivity}
-        assignments={assignments}
-        directStudents={directStudents}
-        groups={groups}
-        invites={invites}
-        roster={roster}
+        classAssignments={classAssignments}
+        directAssignments={directAssignments}
+        hasClasses={hasNamedClasses}
+        teacherAccess={teacherAccess}
       />
     </main>
   );

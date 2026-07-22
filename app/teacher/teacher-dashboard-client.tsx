@@ -1,90 +1,40 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-type GroupSummary = {
-  id: string;
-  name: string;
-  counts: {
-    students: number;
-    invites: number;
-    assignments: number;
-  };
-};
-
-type RecordingOption = {
-  id: string;
-  title: string | null;
-  nussach: string;
-  nussachCustom: string | null;
-  durationMs: number;
-  primaryPasukRef: string;
-};
-
-type InviteSummary = {
-  id: string;
-  token: string;
-  email: string;
-  createdAt: string;
-  expiresAt: string;
-  acceptedAt: string | null;
-  kind: "class" | "direct";
-  groupName: string | null;
-  acceptedByName: string | null;
-};
-
-type AssignmentSummary = {
-  id: string;
-  groupId: string;
-  createdAt: string;
+type DirectAssignmentRow = {
+  assignmentId: string;
+  classId: string;
+  studentId: string;
+  studentName: string | null;
+  studentEmail: string | null;
+  className: string;
+  recordingLabel: string;
   dueAt: string | null;
   instructions: string | null;
-  groupName: string;
-  playbackEventCount: number;
-  recording: {
-    title: string | null;
-    nussach: string;
-    nussachCustom: string | null;
-    primaryPasukRef: string;
-  };
-};
-
-type AssignmentActivityRow = {
-  studentId: string;
-  studentName: string | null;
-  studentEmail: string | null;
   totalEvents: number;
   replayEvents: number;
-  lastOccurredAt: string;
+  lastOccurredAt: string | null;
   topReplayPasukRef: string | null;
   topReplayCount: number;
+  isOld: boolean;
 };
 
-type AssignmentActivitySummary = {
+type ClassAssignmentRow = {
   assignmentId: string;
-  rows: AssignmentActivityRow[];
-};
-
-type RosterItem = {
-  id: string;
-  groupId: string;
-  groupName: string;
-  studentId: string;
-  studentName: string | null;
-  studentEmail: string | null;
-  joinedAt: string;
-  lastActivityAt: string | null;
-};
-
-type DirectStudentItem = {
-  id: string;
-  studentId: string;
-  studentName: string | null;
-  studentEmail: string | null;
-  acceptedAt: string | null;
-  inviteEmail: string | null;
-  lastActivityAt: string | null;
+  classId: string;
+  className: string;
+  recordingLabel: string;
+  dueAt: string | null;
+  instructions: string | null;
+  totalStudents: number;
+  studentsWithActivity: number;
+  totalEvents: number;
+  replayEvents: number;
+  lastOccurredAt: string | null;
+  isOld: boolean;
 };
 
 type AnalyticsSummary = {
@@ -105,13 +55,9 @@ type TeacherAccessSummary = {
 };
 
 type Props = {
-  groups: GroupSummary[];
-  approvedRecordings: RecordingOption[];
-  invites: InviteSummary[];
-  assignments: AssignmentSummary[];
-  assignmentActivity: AssignmentActivitySummary[];
-  directStudents: DirectStudentItem[];
-  roster: RosterItem[];
+  directAssignments: DirectAssignmentRow[];
+  classAssignments: ClassAssignmentRow[];
+  hasClasses: boolean;
   analytics: AnalyticsSummary;
   teacherAccess: TeacherAccessSummary;
 };
@@ -131,32 +77,21 @@ function formatDate(value: string | null): string {
   });
 }
 
-function inviteState(invite: InviteSummary): "accepted" | "expired" | "pending" {
-  if (invite.acceptedAt) {
-    return "accepted";
-  }
-
-  const expires = new Date(invite.expiresAt);
-  if (!Number.isNaN(expires.getTime()) && expires.getTime() < Date.now()) {
-    return "expired";
-  }
-
-  return "pending";
-}
-
-export function TeacherDashboardClient({ groups, approvedRecordings, invites, assignments, assignmentActivity, directStudents, roster, analytics, teacherAccess }: Props) {
+export function TeacherDashboardClient({ directAssignments, classAssignments, hasClasses, analytics, teacherAccess }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [showOld, setShowOld] = useState(false);
 
-  const defaultGroupId = groups[0]?.id ?? "";
-  const defaultRecordingId = approvedRecordings[0]?.id ?? "";
+  const filteredDirectRows = useMemo(
+    () => (showOld ? directAssignments : directAssignments.filter((row) => !row.isOld)),
+    [directAssignments, showOld],
+  );
 
-  const pendingInvites = useMemo(() => invites.filter((invite) => inviteState(invite) === "pending"), [invites]);
-  const activityByAssignmentId = useMemo(
-    () => new Map(assignmentActivity.map((item) => [item.assignmentId, item.rows])),
-    [assignmentActivity],
+  const filteredClassRows = useMemo(
+    () => (showOld ? classAssignments : classAssignments.filter((row) => !row.isOld)),
+    [classAssignments, showOld],
   );
 
   async function withStatus(task: () => Promise<void>) {
@@ -177,111 +112,11 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
     return data;
   }
 
-  async function handleCreateInvite(formData: FormData) {
-    const groupId = String(formData.get("groupId") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
-    const useDirect = groupId === "__DIRECT__";
-
-    if ((!useDirect && !groupId) || !email) {
-      throw new Error("Email is required.");
-    }
-
-    const response = await fetch("/api/teacher/invites", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        expiresInDays,
-        ...(useDirect ? {} : { groupId }),
-      }),
-    });
-
-    await parseJson(response);
-    setStatusMessage("Invite created.");
-    router.refresh();
-  }
-
-  async function handleCreateAssignment(formData: FormData) {
-    const groupId = String(formData.get("groupId") ?? "").trim();
-    const recordingId = String(formData.get("recordingId") ?? "").trim();
-    const instructions = String(formData.get("instructions") ?? "").trim();
-    const dueAt = String(formData.get("dueAt") ?? "").trim();
-
-    if (!groupId || !recordingId) {
-      throw new Error("Class and recording are required.");
-    }
-
-    const response = await fetch("/api/teacher/assignments", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        groupId,
-        recordingId,
-        instructions: instructions || undefined,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
-      }),
-    });
-
-    await parseJson(response);
-    setStatusMessage("Assignment created.");
-    router.refresh();
-  }
-
-  async function handleCreateDirectAssignment(formData: FormData) {
-    const directStudentId = String(formData.get("directStudentId") ?? "").trim();
-    const recordingId = String(formData.get("recordingId") ?? "").trim();
-    const instructions = String(formData.get("instructions") ?? "").trim();
-    const dueAt = String(formData.get("dueAt") ?? "").trim();
-
-    if (!directStudentId || !recordingId) {
-      throw new Error("Student and recording are required.");
-    }
-
-    const response = await fetch("/api/teacher/assignments", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        directStudentId,
-        recordingId,
-        instructions: instructions || undefined,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
-      }),
-    });
-
-    await parseJson(response);
-    setStatusMessage("Direct student assignment created.");
-    router.refresh();
-  }
-
-  async function handleResendInvite(inviteId: string) {
-    const response = await fetch(`/api/teacher/invites/${inviteId}/resend`, {
-      method: "POST",
-    });
-    await parseJson(response);
-    setStatusMessage("Invite resent and expiration extended.");
-    router.refresh();
-  }
-
-  async function handleRevokeInvite(inviteId: string) {
-    const response = await fetch(`/api/teacher/invites/${inviteId}`, {
-      method: "DELETE",
-    });
-    await parseJson(response);
-    setStatusMessage("Invite revoked.");
-    router.refresh();
-  }
-
   async function handleDeleteAssignment(assignmentId: string) {
     const response = await fetch(`/api/teacher/assignments/${assignmentId}`, {
       method: "DELETE",
     });
+
     await parseJson(response);
     setStatusMessage("Assignment removed.");
     router.refresh();
@@ -313,25 +148,6 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
     router.refresh();
   }
 
-  async function handleRemoveEnrollment(enrollmentId: string) {
-    const response = await fetch(`/api/teacher/enrollments/${enrollmentId}`, {
-      method: "DELETE",
-    });
-    await parseJson(response);
-    setStatusMessage("Student removed from class.");
-    router.refresh();
-  }
-
-  async function handleCopyInviteLink(token: string) {
-    if (typeof window === "undefined") {
-      throw new Error("Invite link can only be copied in a browser.");
-    }
-
-    const inviteUrl = `${window.location.origin}/teacher/invite/${token}`;
-    await navigator.clipboard.writeText(inviteUrl);
-    setStatusMessage("Invite link copied.");
-  }
-
   async function handleDeactivateTeacher() {
     if (typeof window !== "undefined") {
       const confirmed = window.confirm("Deactivate teacher mode? You will lose teacher dashboard access until re-activated.");
@@ -357,8 +173,8 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
           <div>
             <h2 className="text-lg font-bold text-orange-950">Teacher Access & Billing</h2>
             <p className="mt-1 text-sm text-orange-900/80">
-              Status: {teacherAccess.status} - Source: {teacherAccess.source} -
-              {" "}{teacherAccess.currencyCode} {(teacherAccess.priceCents / 100).toFixed(2)}
+              Status: {teacherAccess.status} - Source: {teacherAccess.source} - {" "}
+              {teacherAccess.currencyCode} {(teacherAccess.priceCents / 100).toFixed(2)}
             </p>
             <p className="mt-1 text-xs text-orange-900/75">
               Activated: {formatDate(teacherAccess.activatedAt)}
@@ -366,13 +182,17 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
             </p>
           </div>
           <button
-            className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
             disabled={isPending}
             onClick={() => {
               void withStatus(() => handleDeactivateTeacher());
             }}
             type="button"
           >
+            <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <path d="M12 3v10" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+              <path d="M7 6.5a8 8 0 1 0 10 0" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+            </svg>
             Deactivate Teacher Mode
           </button>
         </div>
@@ -405,389 +225,242 @@ export function TeacherDashboardClient({ groups, approvedRecordings, invites, as
         <div className="rounded-xl border border-orange-900/15 bg-orange-100/70 px-4 py-2 text-sm font-semibold text-orange-900">{statusMessage}</div>
       ) : null}
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <article className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-          <h2 className="text-lg font-bold text-orange-950">Invite Student</h2>
-          <form
-            className="mt-3 grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const formData = new FormData(event.currentTarget);
-              void withStatus(() => handleCreateInvite(formData));
-            }}
-          >
-            <label className="text-sm font-semibold text-orange-950">
-              Class / Direct
-              <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue="__DIRECT__" name="groupId" required>
-                <option value="__DIRECT__">Direct 1-on-1 (no class)</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
-                ))}
+      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-4 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-orange-950">Active Student Assignments</h2>
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-orange-900/20 bg-white px-3 py-1">
+              <span className="text-xs font-semibold uppercase tracking-[0.06em] text-orange-900/70">Filter</span>
+              <select
+                className="bg-transparent text-xs font-semibold text-orange-950 outline-none"
+                onChange={(event) => setShowOld(event.target.value === "all")}
+                value={showOld ? "all" : "active"}
+              >
+                <option value="active">Active Only</option>
+                <option value="all">Active + Old</option>
               </select>
-            </label>
-            <label className="text-sm font-semibold text-orange-950">
-              Student Email
-              <input className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" name="email" required type="email" />
-            </label>
-            <label className="text-sm font-semibold text-orange-950">
-              Expiration (days)
-              <input className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue={7} max={30} min={1} name="expiresInDays" type="number" />
-            </label>
-            <button className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-50" disabled={isPending} type="submit">
-              Create Invite
-            </button>
-          </form>
-        </article>
-
-        <article className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-          <h2 className="text-lg font-bold text-orange-950">Create Assignment</h2>
-          <form
-            className="mt-3 grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const formData = new FormData(event.currentTarget);
-              void withStatus(() => handleCreateAssignment(formData));
-            }}
-          >
-            <label className="text-sm font-semibold text-orange-950">
-              Class
-              <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue={defaultGroupId} name="groupId" required>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-semibold text-orange-950">
-              Recording
-              <select className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" defaultValue={defaultRecordingId} name="recordingId" required>
-                {approvedRecordings.map((recording) => (
-                  <option key={recording.id} value={recording.id}>
-                    {recording.title ? `${recording.title} - ` : ""}
-                    {recording.primaryPasukRef} - {recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-semibold text-orange-950">
-              Due Date
-              <input className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" name="dueAt" type="date" />
-            </label>
-            <label className="text-sm font-semibold text-orange-950">
-              Instructions
-              <textarea className="mt-1 w-full rounded-xl border border-orange-900/20 bg-white px-3 py-2" maxLength={2000} name="instructions" rows={3} />
-            </label>
-            <button className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-50" disabled={isPending} type="submit">
-              Assign Recording
-            </button>
-          </form>
-        </article>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <article className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-          <h2 className="text-lg font-bold text-orange-950">Invites</h2>
-          {invites.length === 0 ? (
-            <p className="mt-3 text-sm text-orange-900/75">No invites yet.</p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {invites.map((invite) => {
-                const state = inviteState(invite);
-                return (
-                  <li key={invite.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-orange-950">{invite.email}</p>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${
-                        state === "accepted"
-                          ? "bg-lime-100 text-lime-900"
-                          : state === "expired"
-                            ? "bg-zinc-200 text-zinc-800"
-                            : "bg-amber-100 text-amber-900"
-                      }`}>
-                        {state}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-orange-900/75">
-                        {invite.kind === "direct" ? "Direct 1-on-1" : invite.groupName ?? "Class invite"} - Expires {formatDate(invite.expiresAt)}
-                      {invite.acceptedByName ? ` - Accepted by ${invite.acceptedByName}` : ""}
-                    </p>
-                    {state !== "accepted" ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
+            </div>
+          </div>
+          <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+            <Link className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-200" href="/teacher/invite-student">
+              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <path d="M4 6h16v12H4V6Zm2 1.8 6 4.2 6-4.2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+              </svg>
+              Invite Student
+            </Link>
+            <Link className="inline-flex items-center gap-2 rounded-full border border-sky-300 bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 hover:bg-sky-200" href="/teacher/create-assignment">
+              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+              </svg>
+              Create Assignment
+            </Link>
+          </div>
+        </div>
+        {filteredDirectRows.length === 0 ? (
+          <p className="mt-3 text-sm text-orange-900/75">No direct student assignments for this filter.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-orange-900/15 text-left text-xs uppercase tracking-[0.08em] text-orange-900/70">
+                  <th className="px-2 py-2">Student</th>
+                  <th className="px-2 py-2">Recording</th>
+                  <th className="px-2 py-2">Due</th>
+                  <th className="px-2 py-2">Events</th>
+                  <th className="px-2 py-2">Replays</th>
+                  <th className="px-2 py-2">Last Activity</th>
+                  <th className="px-2 py-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDirectRows.map((row) => (
+                  <tr key={`${row.assignmentId}-${row.studentId}`} className="border-b border-orange-900/10 align-top">
+                    <td className="px-2 py-2 text-orange-950">
+                      <Link className="font-semibold hover:underline" href={`/teacher/students/${row.studentId}`}>
+                        {row.studentName ?? row.studentEmail ?? "Student"}
+                      </Link>
+                      <div className="text-xs text-orange-900/70">{row.studentEmail ?? "-"}</div>
+                    </td>
+                    <td className="px-2 py-2 text-orange-900/80">
+                      {row.recordingLabel}
+                      {row.instructions ? <div className="text-xs text-orange-900/70">{row.instructions}</div> : null}
+                      {row.topReplayPasukRef ? (
+                        <div className="text-xs text-orange-900/70">Top replay: {row.topReplayPasukRef} ({row.topReplayCount})</div>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-2 text-orange-900/80">{formatDate(row.dueAt)}</td>
+                    <td className="px-2 py-2 text-orange-900/80">{row.totalEvents}</td>
+                    <td className="px-2 py-2 text-orange-900/80">{row.replayEvents}</td>
+                    <td className="px-2 py-2 text-orange-900/80">{formatDate(row.lastOccurredAt)}</td>
+                    <td className="px-2 py-2 text-orange-900/80">
+                      <div className="flex flex-wrap gap-2">
                         <button
-                          className="rounded-full border border-orange-900/20 px-3 py-1 text-xs font-semibold hover:bg-orange-100 disabled:opacity-50"
+                          className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-900 hover:bg-indigo-100"
                           disabled={isPending}
-                          onClick={() => {
-                            void withStatus(() => handleCopyInviteLink(invite.token));
-                          }}
+                          onClick={() => setEditingAssignmentId((current) => (current === row.assignmentId ? null : row.assignmentId))}
                           type="button"
                         >
-                          Copy Link
-                        </button>
-                        <a
-                          className="rounded-full border border-orange-900/20 px-3 py-1 text-xs font-semibold hover:bg-orange-100"
-                          href={`/teacher/invite/${invite.token}`}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open Link
-                        </a>
-                        <button
-                          className="rounded-full border border-orange-900/20 px-3 py-1 text-xs font-semibold hover:bg-orange-100 disabled:opacity-50"
-                          disabled={isPending}
-                          onClick={() => {
-                            void withStatus(() => handleResendInvite(invite.id));
-                          }}
-                          type="button"
-                        >
-                          Resend
+                          <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                            <path d="m4 20 4.5-1 9-9a1.5 1.5 0 0 0 0-2.1l-1.4-1.4a1.5 1.5 0 0 0-2.1 0l-9 9L4 20Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                          </svg>
+                          {editingAssignmentId === row.assignmentId ? "Cancel" : "Edit"}
                         </button>
                         <button
-                          className="rounded-full border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
                           disabled={isPending}
                           onClick={() => {
-                            void withStatus(() => handleRevokeInvite(invite.id));
+                            void withStatus(() => handleDeleteAssignment(row.assignmentId));
                           }}
                           type="button"
                         >
-                          Revoke
+                          <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                            <path d="M5 7h14M9 7V5h6v2m-7 0 1 12h6l1-12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                          </svg>
+                          Remove
                         </button>
                       </div>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          className="rounded-full border border-zinc-300 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
-                          disabled={isPending}
-                          onClick={() => {
-                            void withStatus(() => handleRevokeInvite(invite.id));
+
+                      {editingAssignmentId === row.assignmentId ? (
+                        <form
+                          className="mt-2 grid gap-2 rounded-lg border border-orange-900/10 bg-orange-50/60 p-2"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const formData = new FormData(event.currentTarget);
+                            void withStatus(() => handleUpdateAssignment(formData));
                           }}
-                          type="button"
                         >
-                          Clear
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </article>
+                          <input name="assignmentId" type="hidden" value={row.assignmentId} />
+                          <label className="text-xs font-semibold text-orange-950">
+                            Due Date
+                            <input className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={row.dueAt ? row.dueAt.slice(0, 10) : ""} name="dueAt" type="date" />
+                          </label>
+                          <label className="text-xs font-semibold text-orange-950">
+                            Instructions
+                            <textarea className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={row.instructions ?? ""} maxLength={2000} name="instructions" rows={3} />
+                          </label>
+                          <button className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-800" disabled={isPending} type="submit">
+                            <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                              <path d="M5 4h11l3 3v13H5V4Zm3 0v6h8V4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            </svg>
+                            Save
+                          </button>
+                        </form>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-        <article className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-          <h2 className="text-lg font-bold text-orange-950">Assignments</h2>
-          {assignments.length === 0 ? (
-            <p className="mt-3 text-sm text-orange-900/75">No assignments yet.</p>
+      {hasClasses ? (
+        <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-4 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+          <h2 className="text-lg font-bold text-orange-950">Class Assignments</h2>
+          {filteredClassRows.length === 0 ? (
+            <p className="mt-3 text-sm text-orange-900/75">No class assignments for this filter.</p>
           ) : (
-            <ul className="mt-3 space-y-2">
-              {assignments.map((assignment) => (
-                <li key={assignment.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
-                  <p className="text-sm font-semibold text-orange-950">
-                    {assignment.recording.title ? `${assignment.recording.title} - ` : ""}
-                    {assignment.recording.primaryPasukRef} - {assignment.recording.nussach}
-                    {assignment.recording.nussachCustom ? ` (${assignment.recording.nussachCustom})` : ""}
-                  </p>
-                  <p className="mt-1 text-xs text-orange-900/75">
-                    Class: {assignment.groupName} - Due: {formatDate(assignment.dueAt)} - Events: {assignment.playbackEventCount}
-                  </p>
-                  {assignment.instructions ? <p className="mt-1 text-xs text-orange-900/75">{assignment.instructions}</p> : null}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      className="rounded-full border border-orange-900/20 px-3 py-1 text-xs font-semibold hover:bg-orange-100 disabled:opacity-50"
-                      disabled={isPending}
-                      onClick={() => {
-                        setEditingAssignmentId((current) => (current === assignment.id ? null : assignment.id));
-                      }}
-                      type="button"
-                    >
-                      {editingAssignmentId === assignment.id ? "Cancel Edit" : "Edit Assignment"}
-                    </button>
-                    <button
-                      className="rounded-full border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                      disabled={isPending}
-                      onClick={() => {
-                        void withStatus(() => handleDeleteAssignment(assignment.id));
-                      }}
-                      type="button"
-                    >
-                      Remove Assignment
-                    </button>
-                  </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-orange-900/15 text-left text-xs uppercase tracking-[0.08em] text-orange-900/70">
+                    <th className="px-2 py-2">Class</th>
+                    <th className="px-2 py-2">Recording</th>
+                    <th className="px-2 py-2">Due</th>
+                    <th className="px-2 py-2">Students</th>
+                    <th className="px-2 py-2">Logged In</th>
+                    <th className="px-2 py-2">Events</th>
+                    <th className="px-2 py-2">Replays</th>
+                    <th className="px-2 py-2">Last Activity</th>
+                    <th className="px-2 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredClassRows.map((row) => (
+                    <tr key={row.assignmentId} className="border-b border-orange-900/10 align-top">
+                      <td className="px-2 py-2 text-orange-950">
+                        <Link className="font-semibold hover:underline" href={`/teacher/classes/${row.classId}`}>
+                          {row.className}
+                        </Link>
+                      </td>
+                      <td className="px-2 py-2 text-orange-900/80">
+                        {row.recordingLabel}
+                        {row.instructions ? <div className="text-xs text-orange-900/70">{row.instructions}</div> : null}
+                      </td>
+                      <td className="px-2 py-2 text-orange-900/80">{formatDate(row.dueAt)}</td>
+                      <td className="px-2 py-2 text-orange-900/80">{row.totalStudents}</td>
+                      <td className="px-2 py-2 text-orange-900/80">{row.studentsWithActivity}</td>
+                      <td className="px-2 py-2 text-orange-900/80">{row.totalEvents}</td>
+                      <td className="px-2 py-2 text-orange-900/80">{row.replayEvents}</td>
+                      <td className="px-2 py-2 text-orange-900/80">{formatDate(row.lastOccurredAt)}</td>
+                      <td className="px-2 py-2 text-orange-900/80">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-900 hover:bg-indigo-100"
+                            disabled={isPending}
+                            onClick={() => setEditingAssignmentId((current) => (current === row.assignmentId ? null : row.assignmentId))}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                              <path d="m4 20 4.5-1 9-9a1.5 1.5 0 0 0 0-2.1l-1.4-1.4a1.5 1.5 0 0 0-2.1 0l-9 9L4 20Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            </svg>
+                            {editingAssignmentId === row.assignmentId ? "Cancel" : "Edit"}
+                          </button>
+                          <button
+                            className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                            disabled={isPending}
+                            onClick={() => {
+                              void withStatus(() => handleDeleteAssignment(row.assignmentId));
+                            }}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                              <path d="M5 7h14M9 7V5h6v2m-7 0 1 12h6l1-12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            </svg>
+                            Remove
+                          </button>
+                        </div>
 
-                  {editingAssignmentId === assignment.id ? (
-                    <form
-                      className="mt-3 grid gap-2 rounded-lg border border-orange-900/10 bg-orange-50/60 p-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const formData = new FormData(event.currentTarget);
-                        void withStatus(() => handleUpdateAssignment(formData));
-                      }}
-                    >
-                      <input name="assignmentId" type="hidden" value={assignment.id} />
-                      <label className="text-xs font-semibold text-orange-950">
-                        Due Date
-                        <input
-                          className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1"
-                          defaultValue={assignment.dueAt ? assignment.dueAt.slice(0, 10) : ""}
-                          name="dueAt"
-                          type="date"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-orange-950">
-                        Instructions
-                        <textarea
-                          className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1"
-                          defaultValue={assignment.instructions ?? ""}
-                          maxLength={2000}
-                          name="instructions"
-                          rows={3}
-                        />
-                      </label>
-                      <button
-                        className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-50"
-                        disabled={isPending}
-                        type="submit"
-                      >
-                        Save Assignment
-                      </button>
-                    </form>
-                  ) : null}
-
-                  <div className="mt-3 rounded-lg border border-orange-900/10 bg-orange-50/50 p-2">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-orange-900/70">Student Activity Timeline</p>
-                    {(() => {
-                      const rows = activityByAssignmentId.get(assignment.id) ?? [];
-                      if (rows.length === 0) {
-                        return <p className="mt-1 text-xs text-orange-900/70">No playback activity yet.</p>;
-                      }
-
-                      return (
-                        <ul className="mt-2 space-y-1">
-                          {rows.slice(0, 6).map((row) => (
-                            <li key={`${assignment.id}-${row.studentId}`} className="rounded border border-orange-900/10 bg-white px-2 py-1 text-xs text-orange-900/80">
-                              <span className="font-semibold text-orange-950">{row.studentName ?? row.studentEmail ?? "Student"}</span>
-                              {" - "}
-                              Last active {formatDate(row.lastOccurredAt)}
-                              {" - "}
-                              Events {row.totalEvents}
-                              {" - "}
-                              Replays {row.replayEvents}
-                              {row.topReplayPasukRef ? ` - Most replayed ${row.topReplayPasukRef} (${row.topReplayCount})` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      );
-                    })()}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                        {editingAssignmentId === row.assignmentId ? (
+                          <form
+                            className="mt-2 grid gap-2 rounded-lg border border-orange-900/10 bg-orange-50/60 p-2"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              const formData = new FormData(event.currentTarget);
+                              void withStatus(() => handleUpdateAssignment(formData));
+                            }}
+                          >
+                            <input name="assignmentId" type="hidden" value={row.assignmentId} />
+                            <label className="text-xs font-semibold text-orange-950">
+                              Due Date
+                              <input className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={row.dueAt ? row.dueAt.slice(0, 10) : ""} name="dueAt" type="date" />
+                            </label>
+                            <label className="text-xs font-semibold text-orange-950">
+                              Instructions
+                              <textarea className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={row.instructions ?? ""} maxLength={2000} name="instructions" rows={3} />
+                            </label>
+                            <button className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-800" disabled={isPending} type="submit">
+                              <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                                <path d="M5 4h11l3 3v13H5V4Zm3 0v6h8V4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                              </svg>
+                              Save
+                            </button>
+                          </form>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </article>
-      </section>
-
-      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <h2 className="text-lg font-bold text-orange-950">Classes</h2>
-        {groups.length === 0 ? (
-          <p className="mt-3 text-sm text-orange-900/75">No classes yet. Create one above to start inviting students.</p>
-        ) : (
-          <ul className="mt-4 grid gap-3 md:grid-cols-2">
-            {groups.map((group) => (
-              <li key={group.id} className="rounded-xl border border-orange-900/15 bg-white p-4">
-                <p className="font-semibold text-orange-950">{group.name}</p>
-                <p className="mt-1 text-xs text-orange-900/75">
-                  Students: {group.counts.students} - Invites: {group.counts.invites} - Assignments: {group.counts.assignments}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <h2 className="text-lg font-bold text-orange-950">Direct Students</h2>
-        {directStudents.length === 0 ? (
-          <p className="mt-3 text-sm text-orange-900/75">No direct 1-on-1 students yet.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {directStudents.map((student) => (
-              <li key={student.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
-                <p className="text-sm font-semibold text-orange-950">{student.studentName ?? student.studentEmail ?? "Student"}</p>
-                <p className="mt-1 text-xs text-orange-900/75">
-                  Invite: {student.inviteEmail ?? "Direct invite"} - Accepted: {formatDate(student.acceptedAt)} - Last activity: {formatDate(student.lastActivityAt)}
-                </p>
-                <form
-                  className="mt-3 grid gap-2 rounded-lg border border-orange-900/10 bg-orange-50/60 p-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const formData = new FormData(event.currentTarget);
-                    void withStatus(() => handleCreateDirectAssignment(formData));
-                  }}
-                >
-                  <input name="directStudentId" type="hidden" value={student.studentId} />
-                  <label className="text-xs font-semibold text-orange-950">
-                    Assign recording
-                    <select className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" defaultValue={defaultRecordingId} name="recordingId" required>
-                      {approvedRecordings.map((recording) => (
-                        <option key={recording.id} value={recording.id}>
-                          {recording.title ? `${recording.title} - ` : ""}
-                          {recording.primaryPasukRef} - {recording.nussach}{recording.nussachCustom ? ` (${recording.nussachCustom})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-orange-950">
-                    Due Date
-                    <input className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" name="dueAt" type="date" />
-                  </label>
-                  <label className="text-xs font-semibold text-orange-950">
-                    Instructions
-                    <textarea className="mt-1 w-full rounded-lg border border-orange-900/20 bg-white px-2 py-1" maxLength={2000} name="instructions" rows={2} />
-                  </label>
-                  <button
-                    className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-50"
-                    disabled={isPending}
-                    type="submit"
-                  >
-                    Assign To Student
-                  </button>
-                </form>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
-        <h2 className="text-lg font-bold text-orange-950">Student Roster</h2>
-        {roster.length === 0 ? (
-          <p className="mt-3 text-sm text-orange-900/75">No enrolled students yet.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {roster.map((student) => (
-              <li key={student.id} className="rounded-xl border border-orange-900/15 bg-white p-3">
-                <p className="text-sm font-semibold text-orange-950">{student.studentName ?? student.studentEmail ?? "Student"}</p>
-                <p className="mt-1 text-xs text-orange-900/75">
-                  Class: {student.groupName} - Joined: {formatDate(student.joinedAt)} - Last activity: {formatDate(student.lastActivityAt)}
-                </p>
-                <div className="mt-2">
-                  <button
-                    className="rounded-full border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                    disabled={isPending}
-                    onClick={() => {
-                      void withStatus(() => handleRemoveEnrollment(student.id));
-                    }}
-                    type="button"
-                  >
-                    Remove From Class
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {pendingInvites.length === 0 ? null : (
-        <p className="text-xs font-semibold text-orange-900/75">Pending invites currently visible: {pendingInvites.length}</p>
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-4 shadow-[0_12px_28px_rgba(88,31,13,0.1)]">
+          <h2 className="text-lg font-bold text-orange-950">Class Assignments</h2>
+          <p className="mt-2 text-sm text-orange-900/75">No classes yet. Build classes from the Students page when needed.</p>
+        </section>
       )}
     </div>
   );

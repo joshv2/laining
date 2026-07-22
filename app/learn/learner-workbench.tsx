@@ -758,6 +758,9 @@ export function LearnerWorkbench() {
                   <p className="mt-1 text-xs text-orange-900/75">
                     Due: {formatDate(assignment.dueAt)} - Teacher: {assignment.assignedByTeacher.name ?? assignment.assignedByTeacher.email ?? "Teacher"}
                   </p>
+                  <p className="mt-1 text-xs text-orange-900/75">
+                    Class: <Link className="font-semibold underline" href={`/classes/${assignment.group.id}`}>{assignment.group.name}</Link>
+                  </p>
                   {assignment.instructions ? <p className="mt-1 text-xs text-orange-900/75">{assignment.instructions}</p> : null}
                   <button
                     className="mt-2 rounded-full border border-orange-900/25 px-3 py-1 text-xs font-semibold hover:bg-orange-100"

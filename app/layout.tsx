@@ -185,6 +185,14 @@ export default async function RootLayout({
                   Contact
                 </Link>
               </p>
+              <p className="mt-1">
+                <Link
+                  className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900"
+                  href="/contact/product-roadmap"
+                >
+                  Product Roadmap
+                </Link>
+              </p>
             </div>
           </footer>
         </Providers>
