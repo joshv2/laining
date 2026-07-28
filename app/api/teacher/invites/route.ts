@@ -6,7 +6,6 @@ import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 
 const createInviteSchema = z.object({
-  groupId: z.string().min(1).optional(),
   email: z.string().email(),
   expiresInDays: z.number().int().min(1).max(30).optional(),
 });
@@ -23,13 +22,9 @@ export async function GET(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const url = new URL(request.url);
-  const groupId = url.searchParams.get("groupId") ?? undefined;
-
   const invites = await prisma.teacherInvite.findMany({
     where: {
       teacherId: session.user.id,
-      ...(groupId ? { groupId } : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -71,33 +66,13 @@ export async function POST(request: Request) {
   }
 
   const normalizedEmail = parsed.data.email.trim().toLowerCase();
-  let groupId: string | null = null;
-  if (parsed.data.groupId) {
-    const group = await prisma.classGroup.findFirst({
-      where: {
-        id: parsed.data.groupId,
-        teacherId: session.user.id,
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
-
-    if (!group) {
-      return Response.json({ error: "Class not found" }, { status: 404 });
-    }
-
-    groupId = group.id;
-  }
-
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + (parsed.data.expiresInDays ?? 7));
 
   const invite = await prisma.teacherInvite.create({
     data: {
       teacherId: session.user.id,
-      groupId,
+      groupId: null,
       email: normalizedEmail,
       token: crypto.randomUUID(),
       expiresAt,

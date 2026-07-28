@@ -1,4 +1,6 @@
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db/client";
+import { cancelStripeSubscriptionNow, isStripeSecretConfigured } from "@/lib/services/stripe";
 import { deactivateTeacherAccess } from "@/lib/services/teacher-access";
 
 export async function POST() {
@@ -9,6 +11,30 @@ export async function POST() {
   }
 
   try {
+    const subscription = await prisma.teacherAccessSubscription?.findUnique({
+      where: {
+        userId: session.user.id,
+      },
+      select: {
+        source: true,
+        externalSubscriptionId: true,
+      },
+    });
+
+    if (subscription?.source === "STRIPE" && subscription.externalSubscriptionId) {
+      if (!isStripeSecretConfigured()) {
+        return Response.json(
+          {
+            error:
+              "Stripe cancellation is not configured on this environment. Add STRIPE_SECRET_KEY or cancel the subscription in Stripe first.",
+          },
+          { status: 500 },
+        );
+      }
+
+      await cancelStripeSubscriptionNow(subscription.externalSubscriptionId);
+    }
+
     const result = await deactivateTeacherAccess({
       userId: session.user.id,
     });

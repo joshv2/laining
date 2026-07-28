@@ -8,7 +8,7 @@ export default function TermsPage() {
 
       <section className="space-y-4 rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-6 text-sm leading-6 text-orange-950/90 shadow-[0_14px_36px_rgba(88,31,13,0.12)]">
         <p>
-          By using Laining Collaborative, you agree to use the platform respectfully and lawfully, including when uploading
+          By using Laining Lab, you agree to use the platform respectfully and lawfully, including when uploading
           recordings or sharing invite links.
         </p>
         <p>

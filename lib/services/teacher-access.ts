@@ -61,6 +61,15 @@ export type DeactivateTeacherResult = {
   message: string;
 };
 
+export type SyncTeacherAccessFromStripeInput = {
+  userId: string;
+  customerId: string | null;
+  subscriptionId: string;
+  subscriptionActive: boolean;
+  priceCents?: number | null;
+  currencyCode?: string | null;
+};
+
 export async function activateTeacherAccess(input: ActivateTeacherInput, db: PrismaClient = prisma): Promise<ActivateTeacherResult> {
   const now = new Date();
   const requiredPrice = teacherFeaturePriceCents();
@@ -317,5 +326,70 @@ export async function deactivateTeacherAccess(input: DeactivateTeacherInput, db:
       subscriptionStatus: TeacherAccessStatus.CANCELED,
       message: "Teacher mode deactivated. Billing state is now marked as canceled.",
     };
+  });
+}
+
+export async function syncTeacherAccessFromStripe(
+  input: SyncTeacherAccessFromStripeInput,
+  db: PrismaClient = prisma,
+): Promise<void> {
+  const now = new Date();
+  const normalizedPrice = Math.max(0, Math.trunc(input.priceCents ?? teacherFeaturePriceCents()));
+  const normalizedCurrency = (input.currencyCode ?? "USD").toUpperCase();
+
+  await db.$transaction(async (tx) => {
+    const teacherAccessDelegate = (tx as unknown as { teacherAccessSubscription?: TeacherAccessDelegate }).teacherAccessSubscription;
+
+    const user = await tx.user.findUnique({
+      where: {
+        id: input.userId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!user) {
+      return;
+    }
+
+    if (teacherAccessDelegate) {
+      await teacherAccessDelegate.upsert({
+        where: {
+          userId: user.id,
+        },
+        create: {
+          userId: user.id,
+          status: input.subscriptionActive ? TeacherAccessStatus.ACTIVE : TeacherAccessStatus.CANCELED,
+          source: TeacherAccessSource.STRIPE,
+          priceCents: normalizedPrice,
+          currencyCode: normalizedCurrency,
+          externalCustomerId: input.customerId,
+          externalSubscriptionId: input.subscriptionId,
+          activatedAt: now,
+          deactivatedAt: input.subscriptionActive ? null : now,
+        },
+        update: {
+          status: input.subscriptionActive ? TeacherAccessStatus.ACTIVE : TeacherAccessStatus.CANCELED,
+          source: TeacherAccessSource.STRIPE,
+          priceCents: normalizedPrice,
+          currencyCode: normalizedCurrency,
+          couponId: null,
+          externalCustomerId: input.customerId,
+          externalSubscriptionId: input.subscriptionId,
+          activatedAt: input.subscriptionActive ? now : undefined,
+          deactivatedAt: input.subscriptionActive ? null : now,
+        },
+      });
+    }
+
+    await tx.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        role: input.subscriptionActive ? Role.TEACHER : Role.USER,
+      },
+    });
   });
 }
