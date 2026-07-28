@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { isTeacher } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/client";
 import { formatPasukRef } from "@/lib/formatters/pasuk";
+import { teacherFeaturePriceCents } from "@/lib/services/teacher-access";
 
 import { ActivateTeacherButton } from "./activate-teacher-button";
 import { TeacherDashboardClient } from "./teacher-dashboard-client";
@@ -23,6 +24,8 @@ export default async function TeacherPage() {
   }
 
   if (!isTeacher(role)) {
+    const teacherPriceCents = teacherFeaturePriceCents();
+
     return (
       <main className="mx-auto w-full max-w-4xl px-6 py-10 md:px-12">
         <div className="rounded-2xl border border-orange-900/20 bg-[var(--surface)] p-6 shadow-[0_16px_38px_rgba(88,31,13,0.12)]">
@@ -34,7 +37,7 @@ export default async function TeacherPage() {
           <p className="mt-2 max-w-2xl text-xs font-semibold text-orange-900/70">
             Recording playback remains open; only teacher feature access can be coupon or payment gated.
           </p>
-          <div className="mt-5">{role === Role.USER ? <ActivateTeacherButton /> : null}</div>
+          <div className="mt-5">{role === Role.USER ? <ActivateTeacherButton priceCents={teacherPriceCents} /> : null}</div>
           {role !== Role.USER ? (
             <p className="mt-3 text-xs font-semibold text-orange-900/70">
               Current role: {role}. Self-activation is available for standard user accounts only.

@@ -38,7 +38,7 @@ const shlomoStam = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Laining Collaborative",
+  title: "Laining Lab",
   description: "A collaborative platform for learning and sharing Torah, Neviim, and Ketuvim chanting recordings.",
 };
 
@@ -106,7 +106,7 @@ export default async function RootLayout({
             <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3 md:px-12">
               <div className="flex items-center gap-3">
                 <Link className="text-sm font-bold uppercase tracking-[0.14em] text-orange-950" href="/">
-                  Laining Collaborative
+                  Laining Lab
                 </Link>
                 <nav className="flex flex-wrap items-center gap-2 text-xs font-semibold text-orange-900 md:text-sm">
                   <Link className="rounded-full border border-orange-900/20 px-3 py-1.5 hover:bg-orange-100" href="/learn">
@@ -173,7 +173,7 @@ export default async function RootLayout({
 
           <footer className="site-footer border-t border-orange-900/15">
             <div className="mx-auto w-full max-w-6xl px-6 py-6 text-xs text-orange-950/85 md:px-12">
-              <p>Copyright {new Date().getFullYear()} Laining Collaborative.</p>
+              <p>Copyright {new Date().getFullYear()} Laining Lab.</p>
               <p>Website code is licensed under MIT. Uploaded recordings remain property of the site.</p>
               <p className="mt-1">
                 <Link className="underline decoration-orange-900/40 underline-offset-2 hover:decoration-orange-900" href="/terms">

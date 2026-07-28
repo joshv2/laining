@@ -4,6 +4,7 @@ import { Role } from "@prisma/client";
 import { ActivateTeacherButton } from "@/app/teacher/activate-teacher-button";
 import { auth } from "@/lib/auth";
 import { isModeratorOrAbove, isSuperuser, isTeacher } from "@/lib/auth/roles";
+import { teacherFeaturePriceCents } from "@/lib/services/teacher-access";
 
 const highlights = [
   "Pasuk-level seeking and full-portion playback",
@@ -16,13 +17,14 @@ export default async function Home() {
   const session = await auth();
   const role = (session?.user?.role ?? Role.USER) as Role;
   const signedIn = Boolean(session?.user);
+  const teacherPriceCents = teacherFeaturePriceCents();
 
   return (
     <div className="grain relative flex min-h-screen flex-col overflow-hidden px-6 py-10 md:px-12">
       <div className="slide-in mx-auto w-full max-w-6xl rounded-3xl border border-orange-900/20 bg-[var(--surface)] p-8 shadow-[0_22px_60px_rgba(88,31,13,0.15)] md:p-12">
         <header className="mb-10">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--ink-soft)]">Laining Collaborative</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--ink-soft)]">Laining Lab</p>
             <p className="text-hebrew mt-2 text-lg text-[var(--ink-soft)]">לְלַמֵּד • לְהַקְלִיט • לִלְמֹד</p>
           </div>
         </header>
@@ -69,7 +71,7 @@ export default async function Home() {
                   Activate teacher mode to create classes, invite students, and assign recordings.
                 </p>
                 <div className="mt-3">
-                  <ActivateTeacherButton />
+                  <ActivateTeacherButton priceCents={teacherPriceCents} />
                 </div>
               </div>
             ) : null}

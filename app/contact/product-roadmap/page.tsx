@@ -22,7 +22,7 @@ export default function ProductRoadmapPage() {
       <header className="mb-6">
         <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)] md:text-4xl">Product Roadmap</h1>
         <p className="mt-3 text-sm text-orange-900/80">
-          Current and upcoming ideas for Laining Collaborative. This list is public-facing and may evolve over time.
+          Current and upcoming ideas for Laining Lab. This list is public-facing and may evolve over time.
         </p>
       </header>
 

@@ -1,4 +1,4 @@
-# Laining Collaborative
+# Laining Lab
 
 Pasuk-level collaborative laining platform with:
 - learner playback and sing-along mode
@@ -26,9 +26,28 @@ Copy .env.example to .env and set values:
 - AUTH_GOOGLE_ID
 - AUTH_GOOGLE_SECRET
 - NEXTAUTH_URL
+- NEXT_PUBLIC_APP_URL (recommended when using Stripe checkout redirects)
 - ASSEMBLY_API_KEY (optional, required for auto-alignment)
 - NEXT_PUBLIC_GA_MEASUREMENT_ID (optional, for analytics)
 - TEACHER_FEATURE_PRICE_CENTS (optional, defaults to 0; set teacher feature price in cents)
+- STRIPE_SECRET_KEY (required for paid teacher subscriptions)
+- STRIPE_TEACHER_PRICE_ID (required for paid teacher subscriptions)
+- STRIPE_WEBHOOK_SECRET (required for webhook confirmation)
+
+### Stripe Sandbox Setup (Teacher Access at $5.99/month)
+1. In Stripe test mode, create a product (for example "Teacher Access").
+2. Add a recurring monthly price of 5.99 USD and copy the Price ID (`price_...`).
+3. Set these environment variables:
+	- `TEACHER_FEATURE_PRICE_CENTS=599`
+	- `STRIPE_SECRET_KEY=sk_test_...`
+	- `STRIPE_TEACHER_PRICE_ID=price_...`
+	- `NEXT_PUBLIC_APP_URL=http://localhost:3000`
+4. Start the Stripe webhook tunnel and copy the signing secret:
+```bash
+stripe listen --forward-to localhost:3000/api/paywall/checkout/webhook
+```
+5. Set `STRIPE_WEBHOOK_SECRET=whsec_...` from the Stripe CLI output.
+6. Restart `npm run dev` after changing environment variables.
 
 ### Database
 ```bash

@@ -15,7 +15,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-6 py-16">
       <section className="rounded-3xl border border-orange-900/20 bg-white/70 p-8 shadow-[0_14px_34px_rgba(89,33,13,0.14)]">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-800">Laining Collaborative</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-800">Laining Lab</p>
         <h1 className="mt-4 text-3xl font-bold text-orange-950">Sign in with Google</h1>
         <p className="mt-3 text-sm leading-6 text-orange-900/80">
           Google sign-in lands in a lightweight onboarding step first. Public users can continue without an invite code, and class access still uses invite links.

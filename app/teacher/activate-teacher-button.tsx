@@ -3,7 +3,18 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-export function ActivateTeacherButton() {
+type Props = {
+  priceCents: number;
+};
+
+function formatPrice(priceCents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(priceCents / 100);
+}
+
+export function ActivateTeacherButton({ priceCents }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [couponCode, setCouponCode] = useState("");
@@ -16,7 +27,7 @@ export function ActivateTeacherButton() {
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/teacher/activate", {
+        const response = await fetch("/api/paywall/checkout", {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -31,7 +42,14 @@ export function ActivateTeacherButton() {
           throw new Error(data.error ?? "Could not activate teacher mode.");
         }
 
-        setSuccess(data.message ?? "Teacher mode activated.");
+        const checkoutUrl = data?.checkout?.checkoutUrl;
+        const pendingPayment = data?.checkout?.status === "pending-payment";
+        if (pendingPayment && typeof checkoutUrl === "string" && checkoutUrl) {
+          window.location.assign(checkoutUrl);
+          return;
+        }
+
+        setSuccess(data?.checkout?.message ?? data.message ?? "Teacher mode activated.");
         router.refresh();
         router.push("/teacher");
       } catch (activateError) {
@@ -42,6 +60,9 @@ export function ActivateTeacherButton() {
 
   return (
     <div className="space-y-2">
+      <p className="text-xs font-semibold text-orange-900/70">
+        Teacher access starts at {formatPrice(priceCents)} per month.
+      </p>
       <label className="block text-xs font-semibold uppercase tracking-wider text-orange-900/75">
         Coupon Code (Optional)
         <input
@@ -57,7 +78,7 @@ export function ActivateTeacherButton() {
         onClick={handleActivate}
         type="button"
       >
-        {isPending ? "Activating..." : "Activate Teacher Account"}
+        {isPending ? "Working..." : couponCode.trim() ? "Activate With Coupon" : `Subscribe for ${formatPrice(priceCents)}/month`}
       </button>
       {error ? <p className="text-xs font-semibold text-red-700">{error}</p> : null}
       {success ? <p className="text-xs font-semibold text-lime-700">{success}</p> : null}

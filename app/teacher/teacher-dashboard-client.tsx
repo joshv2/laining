@@ -162,6 +162,10 @@ export function TeacherDashboardClient({ directAssignments, classAssignments, ha
 
     const data = await parseJson(response);
     setStatusMessage(data?.result?.message ?? "Teacher mode deactivated.");
+    if (typeof window !== "undefined") {
+      window.location.assign("/teacher");
+      return;
+    }
     router.refresh();
     router.push("/teacher");
   }
