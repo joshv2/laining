@@ -38,8 +38,12 @@ const shlomoStam = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Laining Lab",
-  description: "A collaborative platform for learning and sharing Torah, Neviim, and Ketuvim chanting recordings.",
+  title: {
+    default: "Laining Lab | Teacher Tools + Cantillation Archive",
+    template: "%s | Laining Lab",
+  },
+  description:
+    "Manage Bar/Bat Mitzvah student practice and explore a living cantillation archive across Torah, Neviim, and Ketuvim traditions.",
 };
 
 function initialsForUser(name: string | null | undefined, email: string | null | undefined): string {
